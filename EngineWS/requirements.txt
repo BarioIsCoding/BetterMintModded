@@ -1,0 +1,53 @@
+# BetterMint Modded - Enhanced Server Dependencies
+
+# Core Framework
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+websockets>=12.0
+
+# Data Models and Validation
+pydantic>=2.5.0
+
+# CORS Middleware
+python-multipart>=0.0.6
+
+# GUI Framework
+PySide6>=6.6.0
+
+# System Monitoring
+psutil>=5.9.6
+
+# JSON Handling (built-in but explicit for clarity)
+# json - built-in
+
+# Threading and Async Support (built-in)
+# asyncio - built-in
+# threading - built-in
+
+# File System Operations
+pathlib2>=2.3.7; python_version < "3.4"
+
+# Date and Time Utilities (built-in)
+# datetime - built-in
+
+# Development and Testing (Optional)
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Performance Monitoring
+memory-profiler>=0.61.0
+
+# Optional: Better JSON handling
+orjson>=3.9.0
+
+# Optional: Enhanced logging
+structlog>=23.2.0
+
+# Optional: Configuration management
+python-dotenv>=1.0.0
+
+# Process Management
+supervisor>=4.2.5
+
+# WebSocket Testing Tools
+websocket-client>=1.6.0
