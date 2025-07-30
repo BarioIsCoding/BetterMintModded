@@ -1,0 +1,420 @@
+/* BetterMint Modded - Core Chess Interface Styles */
+
+/* Depth Progress Bar */
+.depthBarLayoutt {
+    display: grid;
+    grid-template-columns: [evaluation] var(--evalAndGutter) [pieces] var(--piecesWidth) [board] var(--boardContainerWidth) [board-controls] var(--boardControlsWidth);
+    margin: -5px 0 5px auto;
+    position: relative;
+}
+
+.depthBarLayoutt .depthBarr {
+    grid-column: board;
+    height: 6px !important;
+    width: var(--boardWidth) !important;
+    display: block;
+    margin-left: calc(var(--boardContainerWidth) - var(--boardWidth));
+    position: relative;
+    background: #403d39;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.depthBarr .depthBarProgress {
+    display: block;
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #5d3fd3, #69923e);
+    position: relative;
+    overflow: hidden;
+    font-size: 15px;
+    text-align: center;
+    color: white;
+    transition: all 150ms ease-out;
+    border-radius: 3px;
+}
+
+.disable-transition {
+    -webkit-transition: none !important;
+    -moz-transition: none !important;
+    -o-transition: color 0 ease-in !important;
+    -ms-transition: none !important;
+    transition: none !important;
+}
+
+/* Evaluation Bar Enhanced */
+.board-layout-evaluation {
+    display: flex;
+    grid-column: evaluation;
+}
+
+.board-layout-evaluation > * {
+    margin-left: calc(var(--boardContainerWidth) - var(--boardWidth) - var(--gutterLeftOfBoard));
+    margin-right: calc(var(--gutterLeftOfBoard) + var(--boardWidth) - var(--boardContainerWidth));
+}
+
+@media (min-width: 960px) {
+    body.with-evaluation {
+        --evalAndGutter: calc(var(--gutterLeftOfBoard) + var(--evalWidth));
+        --evalWidth: 2rem;
+    }
+
+    .board-layout-evaluation {
+        width: var(--evalWidth);
+    }
+
+    .board-layout-evaluation > * {
+        margin: 0 0 0 calc(var(--boardContainerWidth) - var(--boardWidth));
+    }
+}
+
+.evaluation-bar-bar {
+    border-radius: 0.3rem;
+    flex-shrink: 0;
+    height: 100%;
+    position: relative;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    width: 22px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.evaluation-bar-bar.evaluation-bar-clickable {
+    cursor: pointer;
+}
+
+.evaluation-bar-bar.evaluation-bar-flipped,
+.evaluation-bar-bar.evaluation-bar-flipped .evaluation-bar-loader,
+.evaluation-bar-bar.evaluation-bar-flipped .evaluation-bar-scoreAbbreviated {
+    transform: rotate(180deg);
+}
+
+.evaluation-bar-bar.evaluation-bar-flipped .evaluation-bar-score {
+    --flipTransform: rotate(180deg);
+}
+
+.evaluation-bar-bar .evaluation-bar-fill {
+    background-color: hsla(0, 0%, 100%, 0.08);
+    border-radius: 0.3rem;
+    height: 100%;
+    overflow: hidden;
+    position: relative;
+    width: 100%;
+    z-index: -1;
+}
+
+.evaluation-bar-bar .evaluation-bar-color {
+    bottom: 0;
+    height: 100%;
+    left: 0;
+    position: absolute;
+    transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);
+    width: 100%;
+}
+
+.evaluation-bar-bar .evaluation-bar-white {
+    background: linear-gradient(180deg, #ffffff 0%, #f0f0f0 100%);
+    z-index: 2;
+}
+
+.evaluation-bar-bar .evaluation-bar-black {
+    background: linear-gradient(180deg, #403d39 0%, #2c2b29 100%);
+    z-index: 1;
+}
+
+.evaluation-bar-bar .evaluation-bar-draw {
+    background-color: #777574;
+    z-index: 0;
+}
+
+.evaluation-bar-bar .evaluation-bar-loader {
+    height: 100%;
+    width: 100%;
+}
+
+.evaluation-bar-bar .evaluation-bar-loading-message {
+    color: hsla(0, 0%, 100%, 0.7);
+    font-size: 1.4rem;
+    font-weight: 600;
+    left: 50%;
+    position: absolute;
+    -webkit-text-orientation: sideways;
+    text-orientation: sideways;
+    text-transform: uppercase;
+    top: 50%;
+    transform: translate3d(-50%, -50%, 0) rotate(180deg);
+    -ms-writing-mode: tb-rl;
+    writing-mode: vertical-rl;
+    z-index: 2;
+}
+
+.evaluation-bar-bar .evaluation-bar-score {
+    display: none;
+    font-size: 1.2rem;
+    font-weight: 600;
+    -webkit-hyphens: auto;
+    -ms-hyphens: auto;
+    hyphens: auto;
+    padding: 0.5rem 0.2rem;
+    position: absolute;
+    text-align: center;
+    width: 100%;
+    z-index: 2;
+}
+
+.evaluation-bar-bar .evaluation-bar-score.evaluation-bar-dark {
+    bottom: 0;
+    color: #403d39;
+}
+
+.evaluation-bar-bar .evaluation-bar-score.evaluation-bar-light {
+    color: #fff;
+    top: 0;
+}
+
+.evaluation-bar-bar .evaluation-bar-score.evaluation-bar-draw {
+    color: #fff;
+}
+
+.evaluation-bar-bar:hover .evaluation-bar-score {
+    border-radius: 0.4rem;
+    bottom: auto;
+    display: block;
+    font-weight: 700;
+    -webkit-hyphens: auto;
+    -ms-hyphens: auto;
+    hyphens: auto;
+    padding: 0.2rem 0.6rem;
+    position: absolute;
+    text-align: center;
+    top: 50%;
+    transform: translate(calc(12px - 50%), -50%) var(--flipTransform, rotate(0deg));
+    transition: opacity 0.3s ease;
+    transition-delay: 0.1s;
+    width: 50px;
+    z-index: 10;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.evaluation-bar-bar:hover .evaluation-bar-score.evaluation-bar-dark {
+    background-color: #fff;
+    color: #403d39;
+}
+
+.evaluation-bar-bar:hover .evaluation-bar-score.evaluation-bar-light {
+    background-color: #403d39;
+    color: #fff;
+}
+
+.evaluation-bar-bar:hover .evaluation-bar-score-long {
+    white-space: nowrap;
+    width: auto;
+}
+
+.evaluation-bar-bar .evaluation-bar-scoreAbbreviated {
+    font-size: 1rem;
+    font-weight: 600;
+    padding: 0.5rem 0;
+    position: absolute;
+    text-align: center;
+    white-space: pre;
+    width: 100%;
+    z-index: 2;
+}
+
+.evaluation-bar-bar .evaluation-bar-scoreAbbreviated.evaluation-bar-dark {
+    bottom: 0;
+    color: #403d39;
+}
+
+.evaluation-bar-bar .evaluation-bar-scoreAbbreviated.evaluation-bar-light {
+    color: #fff;
+    top: 0;
+}
+
+.evaluation-bar-bar .evaluation-bar-scoreAbbreviated.evaluation-bar-draw {
+    background: transparent;
+    color: #fff;
+    top: calc(50% - 1rem);
+}
+
+/* Enhanced Move Evaluation Text */
+.chessboard .arrow {
+    position: relative;
+}
+
+.chessboard .arrow::after {
+    content: attr(data-text);
+    position: absolute;
+    top: -2em;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.75em;
+    font-weight: 600;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(240, 240, 240, 0.95));
+    border: 1px solid rgba(105, 146, 62, 0.8);
+    padding: 0.3em 0.6em;
+    border-radius: 0.6em;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
+    z-index: 100;
+    color: #2c2b29;
+    backdrop-filter: blur(5px);
+    animation: fadeInScale 0.2s ease-out;
+}
+
+@keyframes fadeInScale {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) scale(1);
+    }
+}
+
+/* Enhanced Status Notifications */
+.betterMint-notification {
+    position: fixed;
+    bottom: 80px;
+    right: 20px;
+    background: linear-gradient(135deg, #69923e, #4e7837);
+    color: white;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    box-shadow: 0 6px 20px rgba(105, 146, 62, 0.4);
+    z-index: 10000;
+    max-width: 300px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    animation: slideInRight 0.3s ease-out;
+}
+
+.betterMint-notification.error {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
+}
+
+.betterMint-notification.success {
+    background: linear-gradient(135deg, #27ae60, #229954);
+    box-shadow: 0 6px 20px rgba(39, 174, 96, 0.4);
+}
+
+.betterMint-notification.warning {
+    background: linear-gradient(135deg, #f39c12, #e67e22);
+    box-shadow: 0 6px 20px rgba(243, 156, 18, 0.4);
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Performance Indicator */
+.performance-indicator {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    z-index: 9999;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(105, 146, 62, 0.3);
+}
+
+.performance-indicator.hidden {
+    display: none;
+}
+
+/* Server Connection Status */
+.server-status {
+    position: fixed;
+    top: 60px;
+    right: 20px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    z-index: 9998;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.server-status.connected {
+    background: linear-gradient(135deg, #27ae60, #229954);
+    color: white;
+}
+
+.server-status.connecting {
+    background: linear-gradient(135deg, #f39c12, #e67e22);
+    color: white;
+}
+
+.server-status.disconnected {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    color: white;
+}
+
+/* Enhanced Chess Piece Highlighting */
+.chess-highlight-enhanced {
+    background: radial-gradient(circle, rgba(105, 146, 62, 0.4) 0%, rgba(105, 146, 62, 0.1) 70%, transparent 100%) !important;
+    border: 2px solid rgba(105, 146, 62, 0.6);
+    border-radius: 4px;
+    box-shadow: inset 0 0 10px rgba(105, 146, 62, 0.3);
+}
+
+/* Smooth Transitions */
+* {
+    transition: all 0.2s ease-out;
+}
+
+.chessboard piece, .chessboard square {
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dark Theme Compatibility */
+@media (prefers-color-scheme: dark) {
+    .evaluation-bar-bar .evaluation-bar-white {
+        background: linear-gradient(180deg, #f8f9fa 0%, #e9ecef 100%);
+    }
+    
+    .evaluation-bar-bar .evaluation-bar-black {
+        background: linear-gradient(180deg, #343a40 0%, #212529 100%);
+    }
+}
+
+/* Accessibility Improvements */
+@media (prefers-reduced-motion: reduce) {
+    .depthBarProgress,
+    .evaluation-bar-color,
+    .chessboard .arrow::after {
+        transition: none !important;
+        animation: none !important;
+    }
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+    .evaluation-bar-bar {
+        border: 2px solid #000;
+    }
+    
+    .depthBarr {
+        border: 1px solid #000;
+    }
+}
