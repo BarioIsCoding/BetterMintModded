@@ -1,0 +1,61 @@
+{
+    "manifest_version": 3,
+    "name": "BetterMint Modded - Chess Analysis",
+    "short_name": "BetterMint Modded",
+    "icons": {
+        "16": "img/logo-16.png",
+        "48": "img/logo-48.png",
+        "128": "img/logo-128.png"
+    },
+    "version": "3.0.0",
+    "description": "Advanced chess analysis tool - Server-side managed. Visit chess.com and run the server application for full functionality.",
+    "permissions": [
+        "storage",
+        "declarativeNetRequest"
+    ],
+    "host_permissions": [
+        "http://*.chess.com/*",
+        "https://*.chess.com/*"
+    ],
+    "content_scripts": [
+        {
+            "js": [
+                "js/loader.js"
+            ],
+            "css": [
+                "css/core.css"
+            ],
+            "matches": [
+                "https://*.chess.com/*"
+            ],
+            "run_at": "document_start"
+        }
+    ],
+    "declarative_net_request": {
+        "rule_resources": [
+            {
+                "id": "ruleset_1",
+                "enabled": true,
+                "path": "rules.json"
+            }
+        ]
+    },
+    "action": {
+        "default_popup": "html/options.html"
+    },
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "js/Mint.js",
+                "html/options.html"
+            ],
+            "matches": [
+                "https://*.chess.com/*"
+            ]
+        }
+    ],
+    "content_security_policy": {
+        "extension_pages": "script-src 'self'; object-src 'self';",
+        "sandbox": "sandbox allow-scripts allow-forms allow-popups allow-modals; script-src 'self' 'unsafe-inline' 'unsafe-eval'; child-src 'self';"
+    }
+}
