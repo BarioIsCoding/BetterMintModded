@@ -1,7 +1,7 @@
 Please verify that the checksum of the installer is identical to the string below. Only download this tool from https://cgpe.netlify.app directly.
 
-PYTHON CHECKSUM - 35AADC50DC7EB1F6CE5BB9F4FA94751E5D174A6CF576AB71BCDAD7FF509D3E87 - Please also verify the contents of the script itself
-EXE CHECKSUM    - 3DF4979891D3616998B528AB03B0B5F3D9DCD5B6A6698C4EEF75B02E595810C6
+PYTHON CHECKSUM - sha256:c45141389b01583ff760accf7a351b6990e1f1863a3ce7b8cdbad755224e0c1b - Please also verify the contents of the script itself
+EXE CHECKSUM    - sha256:5255d5805bf5e2a30bfbc9726ed6af764a54dc4e5dc7333cda3aa23e8cb0ddc4
 
 As for Python, the list of the domains we send request to is below. If you discover another URL in the Python script, uninstall it and download it from https://cgpe.netlify.app
 The Python script is completely open-source and readable.
