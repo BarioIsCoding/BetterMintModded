@@ -5,10 +5,14 @@ import asyncio
 import json
 import time
 import glob
+import socket
+import psutil
 from datetime import datetime
-from threading import Thread, Lock
+from threading import Thread, Lock, Event
 from queue import Queue, Empty
 from pathlib import Path
+import uvicorn
+from contextlib import closing
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -16,19 +20,21 @@ from PySide6.QtWidgets import (
     QMessageBox, QSpacerItem, QSizePolicy, QScrollArea, QGroupBox,
     QGridLayout, QTextEdit, QTabWidget, QSpinBox, QLineEdit,
     QProgressBar, QTableWidget, QTableWidgetItem, QHeaderView,
-    QSplitter, QFileDialog, QMenuBar, QMenu, QStatusBar
+    QSplitter, QFileDialog, QMenuBar, QMenu, QStatusBar, QStyle
 )
-from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSettings
-from PySide6.QtGui import QFont, QPixmap, QAction, QIcon
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSettings, QUrl, QByteArray
+from PySide6.QtGui import QFont, QPixmap, QAction, QIcon, QFontDatabase
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineScript
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.websockets import WebSocketState
 from pydantic import BaseModel
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
-# Chess.com inspired color scheme
+# Chess.com inspired color scheme 
 COLORS = {
     'white': '#ffffff',
     'light_green': '#69923e',
@@ -53,9 +59,19 @@ class PerformanceData(BaseModel):
     engine_depth: int
     evaluation_time: float
 
+class ConnectionInfo:
+    def __init__(self, client_id: str, websocket: WebSocket):
+        self.client_id = client_id
+        self.websocket = websocket
+        self.connected_time = datetime.now()
+        self.last_activity = datetime.now()
+        self.status = "Connected"
+
 class ServerThread(QThread):
     status_changed = Signal(str, str)  # status, color
     performance_update = Signal(dict)  # performance data
+    connection_update = Signal(list)  # connection info
+    log_message = Signal(str)  # log messages
 
     def __init__(self, engine_configs, book_config, tablebase_config, settings_manager):
         super().__init__()
@@ -65,6 +81,40 @@ class ServerThread(QThread):
         self.settings_manager = settings_manager
         self.engines = []
         self.running = False
+        self.server = None
+        self.stop_event = Event()
+        self.connections = {}
+        self.connection_counter = 0
+
+    def update_engines(self, new_configs):
+        """Update engine configurations on the fly"""
+        # Stop old engines
+        for engine in self.engines:
+            engine.quit()
+        
+        self.engines.clear()
+        self.engine_configs = new_configs
+        
+        # Start new engines
+        for config in self.engine_configs:
+            try:
+                engine = EngineChess(
+                    config['path'],
+                    is_maia=config['is_maia'],
+                    maia_config=config['config'],
+                    book_config=self.book_config,
+                    tablebase_config=self.tablebase_config
+                )
+                self.engines.append(engine)
+                self.log_message.emit(f"Loaded engine: {config['name']}")
+            except Exception as e:
+                self.log_message.emit(f"Failed to load engine {config['name']}: {e}")
+
+    def is_port_available(self, port):
+        """Check if port is available"""
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+            result = sock.connect_ex(('localhost', port))
+            return result != 0
 
     def run(self):
         # Initialize engines
@@ -78,9 +128,9 @@ class ServerThread(QThread):
                     tablebase_config=self.tablebase_config
                 )
                 self.engines.append(engine)
-                print(f"Loaded engine: {config['name']}")
+                self.log_message.emit(f"Loaded engine: {config['name']}")
             except Exception as e:
-                print(f"Failed to load engine {config['name']}: {e}")
+                self.log_message.emit(f"Failed to load engine {config['name']}: {e}")
                 continue
 
         # Initialize Maia engines
@@ -88,19 +138,72 @@ class ServerThread(QThread):
             if engine.is_maia:
                 engine.initialize_maia()
 
-        # Start FastAPI server
-        import uvicorn
+        # Check port availability
+        if not self.is_port_available(8000):
+            self.status_changed.emit("Port 8000 in use", COLORS['error_red'])
+            self.log_message.emit("ERROR: Port 8000 is already in use")
+            return
 
-        app = create_fastapi_app(self.engines, self.engine_configs, self.settings_manager)
+        # Create FastAPI app
+        app = create_fastapi_app(
+            self.engines, 
+            self.engine_configs, 
+            self.settings_manager,
+            self.connections,
+            self.connection_update,
+            self.log_message
+        )
 
+        # Start server with proper async handling
         try:
             self.running = True
+            self.stop_event.clear()
             self.status_changed.emit("Running", COLORS['success_green'])
-            uvicorn.run(app, host="localhost", port=8000, log_level="error")
+            
+            config = uvicorn.Config(
+                app=app,
+                host="localhost",
+                port=8000,
+                log_level="error",
+                loop="asyncio"
+            )
+            self.server = uvicorn.Server(config)
+            
+            # Run server in async context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            async def serve():
+                await self.server.serve()
+            
+            # Monitor for stop signal
+            async def monitor_stop():
+                while not self.stop_event.is_set():
+                    await asyncio.sleep(0.1)
+                await self.server.shutdown()
+            
+            loop.create_task(serve())
+            loop.create_task(monitor_stop())
+            loop.run_forever()
+            
         except Exception as e:
-            print(f"Server error: {e}")
+            self.log_message.emit(f"Server error: {e}")
             self.running = False
             self.status_changed.emit("Error", COLORS['error_red'])
+        finally:
+            # Cleanup
+            loop.close()
+            for engine in self.engines:
+                engine.quit()
+            self.running = False
+
+    def stop(self):
+        """Properly stop the server"""
+        self.stop_event.set()
+        if self.server:
+            # Server will shutdown via monitor_stop coroutine
+            pass
+        self.running = False
 
 class SettingsManager:
     def __init__(self):
@@ -184,12 +287,85 @@ class SettingsManager:
         self.settings.update(new_settings)
         self.save_settings()
 
+class ChessComWebView(QWebEngineView):
+    """Custom web view for Chess.com with extension support"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # Create custom profile for persistent storage
+        self.profile = QWebEngineProfile("ChessComProfile", self)
+        self.profile.setPersistentStoragePath(os.path.join(os.getcwd(), "chess_com_storage"))
+        self.profile.setCachePath(os.path.join(os.getcwd(), "chess_com_cache"))
+        
+        # Create page with custom profile
+        self.page_obj = QWebEnginePage(self.profile, self)
+        self.setPage(self.page_obj)
+        
+        # Set user agent to Chrome
+        self.profile.setHttpUserAgent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        
+        # Load extension if available
+        self.load_extension()
+        
+        # Load Chess.com
+        self.setUrl(QUrl("https://www.chess.com"))
+        
+    def load_extension(self):
+        """Load BetterMintModded Chrome extension"""
+        try:
+            # Get extension path
+            script_dir = Path(__file__).parent.parent
+            extension_dir = script_dir / "BetterMintModded"
+            manifest_path = extension_dir / "manifest.json"
+            
+            if manifest_path.exists():
+                # Read manifest
+                with open(manifest_path, 'r') as f:
+                    manifest = json.load(f)
+                
+                # Load content scripts
+                if "content_scripts" in manifest:
+                    for content_script in manifest["content_scripts"]:
+                        for js_file in content_script.get("js", []):
+                            js_path = extension_dir / js_file
+                            if js_path.exists():
+                                with open(js_path, 'r') as f:
+                                    js_content = f.read()
+                                    
+                                script = QWebEngineScript()
+                                script.setName(js_file)
+                                script.setSourceCode(js_content)
+                                script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
+                                script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+                                
+                                self.profile.scripts().insert(script)
+                                print(f"Loaded extension script: {js_file}")
+                
+                print("BetterMintModded extension loaded successfully")
+            else:
+                print(f"Extension not found at: {extension_dir}")
+                
+        except Exception as e:
+            print(f"Failed to load extension: {e}")
+
 class ChessEngineGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("BetterMint Modded - Advanced Chess Engine Manager")
-        self.setMinimumSize(900, 700)
-        self.resize(1200, 800)
+        self.setMinimumSize(1000, 750)
+        self.resize(1400, 900)
+        
+        # Enable high DPI scaling
+        QApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
+
+        # Load custom font
+        self.load_custom_font()
 
         # Initialize settings manager
         self.settings_manager = SettingsManager()
@@ -202,12 +378,45 @@ class ChessEngineGUI(QMainWindow):
         self.performance_data = []
         self.performance_timer = QTimer()
         self.performance_timer.timeout.connect(self.update_performance_metrics)
+        
+        # Connection update timer
+        self.connection_timer = QTimer()
+        self.connection_timer.timeout.connect(self.request_connection_update)
+        self.connection_timer.start(2000)  # Update every 2 seconds
 
         self.setup_ui()
         self.apply_styles()
         self.setup_menu_bar()
         self.setup_status_bar()
         self.load_gui_settings()
+        
+        # Initialize performance monitoring if enabled
+        if self.settings_manager.get_setting("performance-monitoring", False):
+            self.performance_widget.setVisible(True)
+            self.performance_timer.start(1000)
+
+    def load_custom_font(self):
+        """Load Montserrat font from file"""
+        try:
+            font_path = os.path.join(os.path.dirname(__file__), "Montserrat.ttf")
+            if os.path.exists(font_path):
+                font_id = QFontDatabase.addApplicationFont(font_path)
+                if font_id != -1:
+                    font_families = QFontDatabase.applicationFontFamilies(font_id)
+                    if font_families:
+                        font = QFont(font_families[0])
+                        QApplication.setFont(font)
+                        print(f"Loaded custom font: {font_families[0]}")
+                else:
+                    print("Failed to load Montserrat font, using system default")
+            else:
+                print(f"Font file not found: {font_path}")
+                # Try to use system Montserrat if available
+                font = QFont("Montserrat")
+                if font.family() == "Montserrat":
+                    QApplication.setFont(font)
+        except Exception as e:
+            print(f"Error loading custom font: {e}")
 
     def setup_menu_bar(self):
         menubar = self.menuBar()
@@ -265,6 +474,7 @@ class ChessEngineGUI(QMainWindow):
 
         performance_action = QAction('Performance Monitor', self)
         performance_action.setCheckable(True)
+        performance_action.setChecked(self.settings_manager.get_setting("performance-monitoring", False))
         performance_action.triggered.connect(self.toggle_performance_monitoring)
         tools_menu.addAction(performance_action)
 
@@ -314,8 +524,8 @@ class ChessEngineGUI(QMainWindow):
         right_panel = self.create_right_panel()
         main_splitter.addWidget(right_panel)
 
-        # Set splitter sizes (30% left, 70% right)
-        main_splitter.setSizes([300, 700])
+        # Set splitter sizes (25% left, 75% right)
+        main_splitter.setSizes([350, 1050])
 
     def create_left_panel(self):
         left_widget = QWidget()
@@ -337,9 +547,11 @@ class ChessEngineGUI(QMainWindow):
         # Control Buttons
         self.setup_control_buttons(left_layout)
 
-        # Performance Monitor (if enabled)
+        # Performance Monitor (initially visible if enabled)
         self.performance_widget = self.create_performance_widget()
-        self.performance_widget.setVisible(False)
+        self.performance_widget.setVisible(
+            self.settings_manager.get_setting("performance-monitoring", False)
+        )
         left_layout.addWidget(self.performance_widget)
 
         left_layout.addStretch()
@@ -349,6 +561,10 @@ class ChessEngineGUI(QMainWindow):
         # Create tabbed settings interface
         self.settings_tabs = QTabWidget()
         self.settings_tabs.setObjectName("settings_tabs")
+
+        # Chess.com Tab (First)
+        self.chess_com_tab = ChessComWebView()
+        self.settings_tabs.addTab(self.chess_com_tab, "Chess.com")
 
         # Engine Settings Tab
         self.engine_settings_tab = self.create_engine_settings_tab()
@@ -416,6 +632,7 @@ class ChessEngineGUI(QMainWindow):
 
         if name == "Stockfish":
             self.stockfish_checkbox = checkbox
+            checkbox.toggled.connect(self.on_engine_config_changed)
         elif name == "Leela Chess Zero":
             self.leela_checkbox = checkbox
             checkbox.toggled.connect(self.on_leela_toggle)
@@ -464,6 +681,7 @@ class ChessEngineGUI(QMainWindow):
 
         self.strength_combo = QComboBox()
         self.strength_combo.setObjectName("strength_combo")
+        self.strength_combo.currentTextChanged.connect(self.on_engine_config_changed)
         available_weights = self.get_available_maia_weights()
         if available_weights:
             self.strength_combo.addItems(available_weights)
@@ -484,6 +702,7 @@ class ChessEngineGUI(QMainWindow):
         self.nodes_slider.setMaximum(1000)
         self.nodes_slider.setValue(1)
         self.nodes_slider.valueChanged.connect(self.update_nodes_display)
+        self.nodes_slider.sliderReleased.connect(self.on_engine_config_changed)
 
         self.nodes_display = QLabel("0.001")
         self.nodes_display.setObjectName("nodes_display")
@@ -502,9 +721,9 @@ class ChessEngineGUI(QMainWindow):
 
         status_layout = QVBoxLayout(status_group)
 
-        self.status_label = QLabel("Server: Stopped")
-        self.status_label.setObjectName("status_stopped")
-        status_layout.addWidget(self.status_label)
+        self.status_label_local = QLabel("Server: Stopped")
+        self.status_label_local.setObjectName("status_stopped")
+        status_layout.addWidget(self.status_label_local)
 
         self.engines_label = QLabel("Active Engines: 0")
         self.engines_label.setObjectName("status_info")
@@ -909,8 +1128,9 @@ class ChessEngineGUI(QMainWindow):
         # Connection table
         self.connection_table = QTableWidget()
         self.connection_table.setColumnCount(4)
-        self.connection_table.setHorizontalHeaderLabels(["Client", "Connected", "Last Activity", "Status"])
+        self.connection_table.setHorizontalHeaderLabels(["Client ID", "Connected At", "Last Activity", "Status"])
         self.connection_table.horizontalHeader().setStretchLastSection(True)
+        self.connection_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         conn_layout.addWidget(self.connection_table)
 
         layout.addWidget(conn_group)
@@ -948,17 +1168,18 @@ class ChessEngineGUI(QMainWindow):
             QMainWindow {{
                 background-color: {COLORS['darker_gray']};
                 color: {COLORS['white']};
+                font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             }}
 
             QTabWidget#settings_tabs {{
-                background-color: {COLORS['darker_gray']};
+                background-color: transparent;
                 border: none;
             }}
 
             QTabWidget#settings_tabs::pane {{
-                border: 2px solid {COLORS['dark_gray']};
-                border-radius: 8px;
-                background-color: {COLORS['darker_gray']};
+                background-color: transparent;
+                border: none;
+                padding: 10px;
             }}
 
             QTabWidget#settings_tabs::tab-bar {{
@@ -971,7 +1192,8 @@ class ChessEngineGUI(QMainWindow):
                 padding: 12px 20px;
                 margin: 2px;
                 border-radius: 6px 6px 0px 0px;
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 13px;
                 min-width: 80px;
             }}
 
@@ -985,12 +1207,14 @@ class ChessEngineGUI(QMainWindow):
             }}
 
             QGroupBox#group_box, QGroupBox#settings_group {{
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 14px;
                 color: {COLORS['white']};
                 border: 2px solid {COLORS['dark_gray']};
                 border-radius: 8px;
                 margin-top: 10px;
                 padding-top: 15px;
+                background-color: rgba(75, 72, 71, 0.3);
             }}
 
             QGroupBox#group_box::title, QGroupBox#settings_group::title {{
@@ -1003,23 +1227,30 @@ class ChessEngineGUI(QMainWindow):
             }}
 
             QLabel#main_title {{
-                font-size: 24px;
-                font-weight: bold;
+                font-size: 26px;
+                font-weight: 700;
                 color: {COLORS['light_green']};
                 margin: 10px 0;
+                letter-spacing: 1px;
             }}
 
             QFrame#engine_option {{
-                background-color: {COLORS['dark_gray']};
+                background-color: rgba(75, 72, 71, 0.5);
                 border: 1px solid {COLORS['dark_gray']};
                 border-radius: 6px;
                 margin: 2px;
             }}
 
-            QCheckBox#engine_checkbox, QCheckBox#maia_checkbox {{
-                font-weight: bold;
+            QCheckBox {{
+                font-weight: 500;
                 color: {COLORS['white']};
                 spacing: 8px;
+                font-size: 13px;
+            }}
+
+            QCheckBox#engine_checkbox, QCheckBox#maia_checkbox {{
+                font-weight: 600;
+                font-size: 14px;
             }}
 
             QCheckBox::indicator {{
@@ -1037,32 +1268,43 @@ class ChessEngineGUI(QMainWindow):
 
             QLabel#status_available {{
                 color: {COLORS['success_green']};
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 12px;
             }}
 
             QLabel#status_unavailable {{
                 color: {COLORS['error_red']};
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 12px;
             }}
 
             QLabel#description {{
-                color: {COLORS['white']};
-                font-size: 11px;
+                color: rgba(255, 255, 255, 0.8);
+                font-size: 12px;
+                margin-top: 2px;
             }}
 
             QLabel#config_label {{
                 color: {COLORS['white']};
-                font-weight: bold;
+                font-weight: 600;
                 margin-bottom: 5px;
+                font-size: 13px;
             }}
 
-            QComboBox#strength_combo {{
+            QLabel {{
+                color: {COLORS['white']};
+                font-size: 13px;
+            }}
+
+            QComboBox {{
                 background-color: {COLORS['dark_gray']};
                 border: 2px solid {COLORS['light_green']};
                 border-radius: 4px;
                 padding: 8px;
                 color: {COLORS['white']};
-                font-weight: bold;
+                font-weight: 500;
+                font-size: 13px;
+                min-height: 20px;
             }}
 
             QComboBox::drop-down {{
@@ -1082,6 +1324,7 @@ class ChessEngineGUI(QMainWindow):
                 color: {COLORS['white']};
                 selection-background-color: {COLORS['light_green']};
                 border: 1px solid {COLORS['light_green']};
+                font-size: 13px;
             }}
 
             QSlider#nodes_slider {{
@@ -1102,29 +1345,37 @@ class ChessEngineGUI(QMainWindow):
                 margin: -7px 0;
             }}
 
+            QSlider#nodes_slider::handle:horizontal:hover {{
+                background: {COLORS['dark_green']};
+            }}
+
             QLabel#nodes_display {{
                 background-color: {COLORS['dark_gray']};
                 border: 2px solid {COLORS['light_green']};
                 border-radius: 4px;
                 padding: 8px;
                 color: {COLORS['white']};
-                font-weight: bold;
+                font-weight: 600;
                 text-align: center;
+                font-size: 13px;
             }}
 
             QLabel#status_stopped {{
                 color: {COLORS['error_red']};
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 14px;
             }}
 
             QLabel#status_running {{
                 color: {COLORS['success_green']};
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 14px;
             }}
 
             QLabel#status_info {{
-                color: {COLORS['white']};
-                font-weight: bold;
+                color: rgba(255, 255, 255, 0.9);
+                font-weight: 500;
+                font-size: 13px;
             }}
 
             QPushButton#start_button {{
@@ -1132,17 +1383,22 @@ class ChessEngineGUI(QMainWindow):
                 color: {COLORS['white']};
                 border: none;
                 border-radius: 6px;
-                font-weight: bold;
+                font-weight: 700;
                 font-size: 14px;
+                letter-spacing: 0.5px;
             }}
 
             QPushButton#start_button:hover {{
                 background-color: #229954;
             }}
 
+            QPushButton#start_button:pressed {{
+                background-color: #1e7e34;
+            }}
+
             QPushButton#start_button:disabled {{
-                background-color: #666;
-                color: #999;
+                background-color: rgba(102, 102, 102, 0.5);
+                color: rgba(153, 153, 153, 0.8);
             }}
 
             QPushButton#stop_button {{
@@ -1150,26 +1406,42 @@ class ChessEngineGUI(QMainWindow):
                 color: {COLORS['white']};
                 border: none;
                 border-radius: 6px;
-                font-weight: bold;
+                font-weight: 700;
                 font-size: 14px;
+                letter-spacing: 0.5px;
             }}
 
             QPushButton#stop_button:hover {{
                 background-color: #c0392b;
             }}
 
+            QPushButton#stop_button:pressed {{
+                background-color: #a93226;
+            }}
+
             QPushButton#stop_button:disabled {{
-                background-color: #666;
-                color: #999;
+                background-color: rgba(102, 102, 102, 0.5);
+                color: rgba(153, 153, 153, 0.8);
             }}
 
             QSpinBox {{
                 background-color: {COLORS['dark_gray']};
                 border: 2px solid {COLORS['light_green']};
                 border-radius: 4px;
-                padding: 5px;
+                padding: 6px;
                 color: {COLORS['white']};
-                font-weight: bold;
+                font-weight: 500;
+                font-size: 13px;
+                min-height: 20px;
+            }}
+
+            QSpinBox::up-button, QSpinBox::down-button {{
+                background-color: {COLORS['light_green']};
+                width: 20px;
+            }}
+
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+                background-color: {COLORS['dark_green']};
             }}
 
             QLineEdit {{
@@ -1178,7 +1450,12 @@ class ChessEngineGUI(QMainWindow):
                 border-radius: 4px;
                 padding: 8px;
                 color: {COLORS['white']};
-                font-weight: bold;
+                font-weight: 500;
+                font-size: 13px;
+            }}
+
+            QLineEdit:focus {{
+                border-color: {COLORS['dark_green']};
             }}
 
             QProgressBar#progress_bar {{
@@ -1186,7 +1463,9 @@ class ChessEngineGUI(QMainWindow):
                 border-radius: 4px;
                 text-align: center;
                 color: {COLORS['white']};
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 12px;
+                background-color: rgba(75, 72, 71, 0.5);
             }}
 
             QProgressBar#progress_bar::chunk {{
@@ -1195,16 +1474,17 @@ class ChessEngineGUI(QMainWindow):
             }}
 
             QTableWidget {{
-                background-color: {COLORS['dark_gray']};
-                border: 2px solid {COLORS['light_green']};
+                background-color: rgba(75, 72, 71, 0.5);
+                border: 2px solid {COLORS['dark_gray']};
                 border-radius: 4px;
                 color: {COLORS['white']};
                 gridline-color: {COLORS['darker_gray']};
+                font-size: 12px;
             }}
 
             QTableWidget::item {{
                 padding: 8px;
-                border-bottom: 1px solid {COLORS['darker_gray']};
+                border-bottom: 1px solid rgba(75, 72, 71, 0.3);
             }}
 
             QTableWidget::item:selected {{
@@ -1212,19 +1492,22 @@ class ChessEngineGUI(QMainWindow):
             }}
 
             QHeaderView::section {{
-                background-color: {COLORS['light_green']};
+                background-color: {COLORS['dark_gray']};
                 color: {COLORS['white']};
                 padding: 8px;
                 border: none;
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 12px;
             }}
 
             QTextEdit#activity_log {{
-                background-color: {COLORS['dark_gray']};
-                border: 2px solid {COLORS['light_green']};
+                background-color: rgba(75, 72, 71, 0.5);
+                border: 2px solid {COLORS['dark_gray']};
                 border-radius: 4px;
                 color: {COLORS['white']};
-                font-family: Consolas, Monaco, monospace;
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 12px;
+                padding: 8px;
             }}
 
             QPushButton {{
@@ -1233,7 +1516,8 @@ class ChessEngineGUI(QMainWindow):
                 border: none;
                 border-radius: 4px;
                 padding: 8px 16px;
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 13px;
             }}
 
             QPushButton:hover {{
@@ -1248,12 +1532,14 @@ class ChessEngineGUI(QMainWindow):
                 background-color: {COLORS['dark_gray']};
                 color: {COLORS['white']};
                 border-top: 1px solid {COLORS['light_green']};
+                font-size: 12px;
             }}
 
             QMenuBar {{
                 background-color: {COLORS['dark_gray']};
                 color: {COLORS['white']};
                 border-bottom: 1px solid {COLORS['light_green']};
+                font-size: 13px;
             }}
 
             QMenuBar::item {{
@@ -1269,6 +1555,7 @@ class ChessEngineGUI(QMainWindow):
                 background-color: {COLORS['dark_gray']};
                 color: {COLORS['white']};
                 border: 1px solid {COLORS['light_green']};
+                font-size: 13px;
             }}
 
             QMenu::item {{
@@ -1277,6 +1564,31 @@ class ChessEngineGUI(QMainWindow):
 
             QMenu::item:selected {{
                 background-color: {COLORS['light_green']};
+            }}
+
+            QSplitter::handle {{
+                background-color: {COLORS['dark_gray']};
+                width: 2px;
+            }}
+
+            QScrollBar:vertical {{
+                background-color: {COLORS['dark_gray']};
+                width: 12px;
+                border-radius: 6px;
+            }}
+
+            QScrollBar::handle:vertical {{
+                background-color: {COLORS['light_green']};
+                border-radius: 6px;
+                min-height: 20px;
+            }}
+
+            QScrollBar::handle:vertical:hover {{
+                background-color: {COLORS['dark_green']};
+            }}
+
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
             }}
         """)
 
@@ -1289,9 +1601,59 @@ class ChessEngineGUI(QMainWindow):
         self.maia_frame.setVisible(checked)
         if not checked:
             self.maia_checkbox.setChecked(False)
+        self.on_engine_config_changed()
 
     def on_maia_toggle(self, checked):
         self.maia_config_frame.setVisible(checked)
+        self.on_engine_config_changed()
+
+    def on_engine_config_changed(self):
+        """Update engines when configuration changes"""
+        if self.server_running and self.server_thread:
+            selected_engines = self.get_selected_engines()
+            if selected_engines:
+                self.server_thread.update_engines(selected_engines)
+                self.log_activity("Engine configuration updated")
+
+    def get_selected_engines(self):
+        """Get currently selected engine configurations"""
+        selected_engines = []
+
+        if hasattr(self, 'stockfish_checkbox') and self.stockfish_checkbox.isChecked():
+            if self.check_stockfish_available():
+                selected_engines.append({
+                    'path': 'engines/stockfish/stockfish.exe',
+                    'is_maia': False,
+                    'config': {},
+                    'name': 'Stockfish'
+                })
+
+        if hasattr(self, 'leela_checkbox') and self.leela_checkbox.isChecked():
+            if self.check_leela_available():
+                config = {}
+                if hasattr(self, 'maia_checkbox') and self.maia_checkbox.isChecked():
+                    strength = self.strength_combo.currentText()
+                    weights_path = f"weights/maia-{strength}.pb.gz"
+                    if os.path.exists(weights_path):
+                        nodes_value = self.nodes_slider.value() / 1000.0
+                        config = {
+                            'weights_file': weights_path,
+                            'nodes_per_second_limit': nodes_value,
+                            'use_slowmover': False
+                        }
+
+                engine_name = "Leela"
+                if hasattr(self, 'maia_checkbox') and self.maia_checkbox.isChecked():
+                    engine_name += f" + Maia {self.strength_combo.currentText()}"
+
+                selected_engines.append({
+                    'path': 'engines/leela/lc0.exe',
+                    'is_maia': hasattr(self, 'maia_checkbox') and self.maia_checkbox.isChecked(),
+                    'config': config,
+                    'name': engine_name
+                })
+
+        return selected_engines
 
     def check_stockfish_available(self):
         return os.path.exists("engines/stockfish/stockfish.exe")
@@ -1318,8 +1680,7 @@ class ChessEngineGUI(QMainWindow):
             self.log_activity("Performance monitoring disabled")
 
     def update_performance_metrics(self):
-        # Simulate performance metrics (in real implementation, get actual values)
-        import psutil
+        # Get real performance metrics
         try:
             cpu_percent = psutil.cpu_percent()
             memory_info = psutil.virtual_memory()
@@ -1334,55 +1695,33 @@ class ChessEngineGUI(QMainWindow):
         except Exception as e:
             print(f"Error updating performance metrics: {e}")
 
+    def update_connection_table(self, connections):
+        """Update the connection monitor table"""
+        self.connection_table.setRowCount(len(connections))
+        
+        for i, conn_info in enumerate(connections):
+            self.connection_table.setItem(i, 0, QTableWidgetItem(conn_info.get('client_id', 'Unknown')))
+            self.connection_table.setItem(i, 1, QTableWidgetItem(conn_info.get('connected_time', '')))
+            self.connection_table.setItem(i, 2, QTableWidgetItem(conn_info.get('last_activity', '')))
+            self.connection_table.setItem(i, 3, QTableWidgetItem(conn_info.get('status', 'Unknown')))
+        
+        # Update connection count
+        conn_count = len(connections)
+        self.connections_label.setText(f"Connections: {conn_count}")
+        self.connection_count_label.setText(f"Connections: {conn_count}")
+
+    def request_connection_update(self):
+        """Request connection info update from server thread"""
+        if self.server_thread and self.server_running:
+            # Connection info will be sent via signal from server thread
+            pass
+
     def log_activity(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.activity_log.append(f"[{timestamp}] {message}")
 
     def start_server(self):
-        selected_engines = []
-
-        if self.stockfish_checkbox.isChecked():
-            if self.check_stockfish_available():
-                selected_engines.append({
-                    'path': 'engines/stockfish/stockfish.exe',
-                    'is_maia': False,
-                    'config': {},
-                    'name': 'Stockfish'
-                })
-            else:
-                QMessageBox.critical(self, "Error", "Stockfish not found")
-                return
-
-        if self.leela_checkbox.isChecked():
-            if self.check_leela_available():
-                config = {}
-                if self.maia_checkbox.isChecked():
-                    strength = self.strength_combo.currentText()
-                    weights_path = f"weights/maia-{strength}.pb.gz"
-                    if os.path.exists(weights_path):
-                        nodes_value = self.nodes_slider.value() / 1000.0
-                        config = {
-                            'weights_file': weights_path,
-                            'nodes_per_second_limit': nodes_value,
-                            'use_slowmover': False
-                        }
-                    else:
-                        QMessageBox.critical(self, "Error", f"Maia weights not found: {weights_path}")
-                        return
-
-                engine_name = "Leela"
-                if self.maia_checkbox.isChecked():
-                    engine_name += f" + Maia {self.strength_combo.currentText()}"
-
-                selected_engines.append({
-                    'path': 'engines/leela/lc0.exe',
-                    'is_maia': self.maia_checkbox.isChecked(),
-                    'config': config,
-                    'name': engine_name
-                })
-            else:
-                QMessageBox.critical(self, "Error", "Leela not found")
-                return
+        selected_engines = self.get_selected_engines()
 
         if not selected_engines:
             QMessageBox.warning(self, "Warning", "Please select at least one engine")
@@ -1394,13 +1733,15 @@ class ChessEngineGUI(QMainWindow):
         try:
             self.server_thread = ServerThread(selected_engines, book_config, tablebase_config, self.settings_manager)
             self.server_thread.status_changed.connect(self.on_server_status_changed)
+            self.server_thread.connection_update.connect(self.update_connection_table)
+            self.server_thread.log_message.connect(self.log_activity)
             self.server_thread.start()
 
             self.server_running = True
 
             # Update UI
-            self.status_label.setText("Server: Starting...")
-            self.status_label.setObjectName("status_running")
+            self.status_label_local.setText("Server: Starting...")
+            self.status_label_local.setObjectName("status_running")
             self.engines_label.setText(f"Active Engines: {len(selected_engines)}")
             self.start_button.setEnabled(False)
             self.stop_button.setEnabled(True)
@@ -1413,22 +1754,40 @@ class ChessEngineGUI(QMainWindow):
 
     def stop_server(self):
         if self.server_thread and self.server_thread.isRunning():
-            self.server_thread.terminate()
-            self.server_thread.wait()
+            self.server_thread.stop()
+            self.server_thread.wait(5000)  # Wait up to 5 seconds for clean shutdown
+            
+            if self.server_thread.isRunning():
+                self.server_thread.terminate()
+                self.server_thread.wait()
 
         self.server_running = False
 
-        self.status_label.setText("Server: Stopped")
-        self.status_label.setObjectName("status_stopped")
+        self.status_label_local.setText("Server: Stopped")
+        self.status_label_local.setObjectName("status_stopped")
         self.engines_label.setText("Active Engines: 0")
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
 
         self.log_activity("Server stopped")
+        
+        # Clear connection table
+        self.connection_table.setRowCount(0)
+        self.connections_label.setText("Connections: 0")
+        self.connection_count_label.setText("Connections: 0")
 
     def on_server_status_changed(self, status, color):
-        self.status_label.setText(f"Server: {status}")
+        self.status_label_local.setText(f"Server: {status}")
         self.server_status_label.setText(f"Server: {status}")
+        
+        if status == "Running":
+            self.status_label_local.setObjectName("status_running")
+        else:
+            self.status_label_local.setObjectName("status_stopped")
+        
+        # Re-apply styles to update colors
+        self.status_label_local.style().unpolish(self.status_label_local)
+        self.status_label_local.style().polish(self.status_label_local)
 
     # Menu actions
     def new_profile(self):
@@ -1586,13 +1945,13 @@ class ChessEngineGUI(QMainWindow):
             self.stop_server()
 
         # Save window state
-        settings = QSettings()
+        settings = QSettings("BetterMint", "BetterMintModded")
         settings.setValue("geometry", self.saveGeometry())
         settings.setValue("windowState", self.saveState())
 
         event.accept()
 
-# Engine classes and FastAPI setup remain the same as before, but with API enhancements...
+# Engine classes and FastAPI setup
 
 def enqueue_output(out, queue):
     for line in iter(out.readline, b''):
@@ -1716,8 +2075,16 @@ class EngineChess:
     def read_line(self) -> str:
         self.send_next_command()
         return self._read_line()
+    
+    def quit(self):
+        """Properly quit the engine"""
+        self.put("quit")
+        time.sleep(0.5)
+        if self._engine.poll() is None:
+            self._engine.terminate()
+            self._engine.wait(timeout=2)
 
-def create_fastapi_app(engines, engine_configs, settings_manager):
+def create_fastapi_app(engines, engine_configs, settings_manager, connections, connection_update_signal, log_signal):
     app = FastAPI(title="BetterMint Modded API", version="3.0.0")
 
     app.add_middleware(
@@ -1730,6 +2097,7 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
     )
 
     active_connections = set()
+    connection_counter = 0
 
     @app.get("/api/settings")
     async def get_settings():
@@ -1774,13 +2142,36 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
-        nonlocal active_connections
+        nonlocal active_connections, connection_counter, connections
 
+        connection_counter += 1
+        client_id = f"client_{connection_counter}"
+        conn_info = ConnectionInfo(client_id, websocket)
+        connections[client_id] = conn_info
+        
         active_connections.add(websocket)
         await websocket.accept()
+        
+        # Send connection update
+        conn_list = []
+        for cid, cinfo in connections.items():
+            conn_list.append({
+                'client_id': cinfo.client_id,
+                'connected_time': cinfo.connected_time.strftime("%H:%M:%S"),
+                'last_activity': cinfo.last_activity.strftime("%H:%M:%S"),
+                'status': cinfo.status
+            })
+        connection_update_signal.emit(conn_list)
+        
+        log_signal.emit(f"New connection: {client_id}")
 
         try:
             async def process_client_command(data):
+                nonlocal connections
+                # Update last activity
+                if client_id in connections:
+                    connections[client_id].last_activity = datetime.now()
+                
                 if data.startswith("go"):
                     for engine in engines:
                         if engine.is_maia:
@@ -1809,7 +2200,7 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
                     except WebSocketDisconnect:
                         break
                     except Exception as e:
-                        print(f"Error receiving data: {e}")
+                        log_signal.emit(f"Error receiving data from {client_id}: {e}")
                         break
 
             asyncio.create_task(handle_client())
@@ -1832,18 +2223,53 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
                                     disconnected_connections.add(conn)
 
                             active_connections -= disconnected_connections
+                            
+                            # Update connection list
+                            for conn in disconnected_connections:
+                                for cid, cinfo in list(connections.items()):
+                                    if cinfo.websocket == conn:
+                                        del connections[cid]
+                                        log_signal.emit(f"Disconnected: {cid}")
+                                        break
+                            
+                            # Send updated connection list
+                            conn_list = []
+                            for cid, cinfo in connections.items():
+                                conn_list.append({
+                                    'client_id': cinfo.client_id,
+                                    'connected_time': cinfo.connected_time.strftime("%H:%M:%S"),
+                                    'last_activity': cinfo.last_activity.strftime("%H:%M:%S"),
+                                    'status': cinfo.status
+                                })
+                            connection_update_signal.emit(conn_list)
                     else:
                         await asyncio.sleep(0.01)
                 except Exception as e:
-                    print(f"Error in main loop: {e}")
+                    log_signal.emit(f"Error in main loop: {e}")
                     break
 
         except WebSocketDisconnect:
             pass
         except Exception as e:
-            print(f"Error in WebSocket: {e}")
+            log_signal.emit(f"Error in WebSocket: {e}")
         finally:
             active_connections.discard(websocket)
+            if client_id in connections:
+                del connections[client_id]
+            
+            # Send updated connection list
+            conn_list = []
+            for cid, cinfo in connections.items():
+                conn_list.append({
+                    'client_id': cinfo.client_id,
+                    'connected_time': cinfo.connected_time.strftime("%H:%M:%S"),
+                    'last_activity': cinfo.last_activity.strftime("%H:%M:%S"),
+                    'status': cinfo.status
+                })
+            connection_update_signal.emit(conn_list)
+            
+            log_signal.emit(f"Connection closed: {client_id}")
+            
             try:
                 if websocket.client_state == WebSocketState.CONNECTED:
                     await websocket.close()
@@ -1861,190 +2287,261 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
     <head>
         <title>BetterMint Modded - WebSocket Interface</title>
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap');
 
             * {{
                 box-sizing: border-box;
+                margin: 0;
+                padding: 0;
             }}
 
             body {{
                 font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                margin: 0;
-                background: {COLORS['darker_gray']};
+                background: linear-gradient(135deg, {COLORS['darker_gray']} 0%, {COLORS['dark_gray']} 100%);
                 color: {COLORS['white']};
-                line-height: 1.5;
+                line-height: 1.6;
+                min-height: 100vh;
             }}
+            
             .container {{
                 max-width: 1400px;
                 margin: 0 auto;
                 padding: 20px;
                 min-height: 100vh;
             }}
+            
             .header {{
                 text-align: center;
                 margin-bottom: 40px;
-                padding: 20px;
-                background: {COLORS['dark_gray']};
+                padding: 30px;
+                background: rgba(75, 72, 71, 0.5);
                 border-radius: 12px;
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(105, 146, 62, 0.3);
             }}
+            
             .header h1 {{
                 font-weight: 700;
-                font-size: 32px;
+                font-size: 36px;
                 color: {COLORS['white']};
-                margin: 0 0 15px 0;
+                margin: 0 0 20px 0;
+                letter-spacing: 1px;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
             }}
+            
             .status {{
                 color: {COLORS['light_green']};
-                font-weight: 700;
-                margin: 8px 0;
+                font-weight: 600;
                 font-size: 16px;
                 display: inline-block;
-                background: rgba(105, 146, 62, 0.1);
-                padding: 5px 15px;
-                border-radius: 20px;
+                background: rgba(105, 146, 62, 0.2);
+                padding: 8px 20px;
+                border-radius: 25px;
                 margin: 0 10px;
+                border: 1px solid {COLORS['light_green']};
             }}
+            
             .grid {{
                 display: grid;
                 grid-template-columns: 1fr 1fr;
                 gap: 30px;
                 margin-bottom: 30px;
             }}
+            
             .card {{
-                background: {COLORS['dark_gray']};
+                background: rgba(75, 72, 71, 0.5);
                 padding: 25px;
                 border-radius: 12px;
-                border: 1px solid {COLORS['light_green']};
+                border: 1px solid rgba(105, 146, 62, 0.3);
+                backdrop-filter: blur(10px);
+                transition: transform 0.3s ease, box-shadow 0.3s ease;
             }}
+            
+            .card:hover {{
+                transform: translateY(-2px);
+                box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            }}
+            
             .card h3 {{
                 font-weight: 700;
                 margin: 0 0 20px 0;
                 color: {COLORS['light_green']};
-                font-size: 18px;
+                font-size: 20px;
                 border-bottom: 2px solid {COLORS['light_green']};
                 padding-bottom: 10px;
             }}
+            
             .engine-list {{
-                background: {COLORS['darker_gray']};
+                background: rgba(44, 43, 41, 0.5);
                 padding: 15px;
                 border-radius: 8px;
                 border-left: 4px solid {COLORS['light_green']};
                 margin-bottom: 20px;
+                font-size: 14px;
+                line-height: 1.8;
             }}
+            
             .quick-commands {{
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
                 gap: 10px;
                 margin-bottom: 20px;
             }}
+            
             .quick-commands button {{
-                background: {COLORS['light_green']};
+                background: linear-gradient(135deg, {COLORS['light_green']} 0%, {COLORS['dark_green']} 100%);
                 color: {COLORS['white']};
                 border: none;
                 padding: 12px 16px;
-                border-radius: 6px;
+                border-radius: 8px;
                 cursor: pointer;
-                font-weight: 700;
+                font-weight: 600;
                 font-family: 'Montserrat', sans-serif;
-                transition: all 0.2s ease;
+                transition: all 0.3s ease;
                 font-size: 12px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
             }}
+            
             .quick-commands button:hover {{
-                background: {COLORS['dark_green']};
-                transform: translateY(-1px);
+                transform: translateY(-2px);
+                box-shadow: 0 4px 8px rgba(0,0,0,0.3);
             }}
+            
+            .quick-commands button:active {{
+                transform: translateY(0);
+            }}
+            
             .input-group {{
                 display: flex;
                 gap: 10px;
                 margin-bottom: 20px;
             }}
+            
             #messageText {{
                 flex: 1;
                 padding: 12px 16px;
                 border: 2px solid {COLORS['light_green']};
-                border-radius: 6px;
-                background: {COLORS['darker_gray']};
+                border-radius: 8px;
+                background: rgba(44, 43, 41, 0.5);
                 color: {COLORS['white']};
                 font-family: 'Montserrat', sans-serif;
                 font-size: 14px;
                 outline: none;
-                transition: border-color 0.2s ease;
+                transition: all 0.3s ease;
             }}
+            
             #messageText:focus {{
                 border-color: {COLORS['dark_green']};
+                background: rgba(44, 43, 41, 0.8);
+                box-shadow: 0 0 0 3px rgba(105, 146, 62, 0.2);
             }}
+            
             .form-button {{
-                background: {COLORS['light_green']};
+                background: linear-gradient(135deg, {COLORS['light_green']} 0%, {COLORS['dark_green']} 100%);
                 color: {COLORS['white']};
                 border: none;
-                padding: 12px 20px;
-                border-radius: 6px;
+                padding: 12px 24px;
+                border-radius: 8px;
                 cursor: pointer;
-                font-weight: 700;
+                font-weight: 600;
                 font-family: 'Montserrat', sans-serif;
-                transition: all 0.2s ease;
+                transition: all 0.3s ease;
                 font-size: 14px;
                 min-width: 80px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
             }}
+            
             .form-button:hover {{
-                background: {COLORS['dark_green']};
-                transform: translateY(-1px);
+                transform: translateY(-2px);
+                box-shadow: 0 4px 8px rgba(0,0,0,0.3);
             }}
+            
             .form-button.secondary {{
-                background: {COLORS['dark_gray']};
+                background: linear-gradient(135deg, {COLORS['dark_gray']} 0%, {COLORS['darker_gray']} 100%);
                 border: 2px solid {COLORS['light_green']};
             }}
-            .form-button.secondary:hover {{
-                background: {COLORS['darker_gray']};
-            }}
+            
             #messages {{
                 height: 400px;
                 overflow-y: auto;
-                border: 2px solid {COLORS['dark_gray']};
+                border: 2px solid rgba(105, 146, 62, 0.3);
                 padding: 20px;
-                background: {COLORS['darker_gray']};
+                background: rgba(44, 43, 41, 0.5);
                 border-radius: 8px;
-                font-family: 'Courier New', monospace;
+                font-family: 'Consolas', 'Monaco', monospace;
                 font-size: 13px;
                 list-style: none;
-                margin: 0;
                 scrollbar-width: thin;
                 scrollbar-color: {COLORS['light_green']} {COLORS['dark_gray']};
             }}
+            
             #messages::-webkit-scrollbar {{
-                width: 8px;
+                width: 10px;
             }}
+            
             #messages::-webkit-scrollbar-track {{
                 background: {COLORS['dark_gray']};
-                border-radius: 4px;
+                border-radius: 5px;
             }}
+            
             #messages::-webkit-scrollbar-thumb {{
                 background: {COLORS['light_green']};
-                border-radius: 4px;
+                border-radius: 5px;
             }}
+            
+            #messages::-webkit-scrollbar-thumb:hover {{
+                background: {COLORS['dark_green']};
+            }}
+            
             #messages li {{
-                margin: 3px 0;
+                margin: 4px 0;
                 color: {COLORS['white']};
-                padding: 2px 0;
+                padding: 4px 0;
                 border-bottom: 1px solid rgba(75, 72, 71, 0.3);
+                transition: background 0.2s ease;
             }}
+            
+            #messages li:hover {{
+                background: rgba(105, 146, 62, 0.1);
+                padding-left: 8px;
+            }}
+            
             .connection-indicator {{
                 position: fixed;
                 top: 20px;
                 right: 20px;
-                padding: 8px 16px;
-                border-radius: 20px;
-                font-weight: 700;
-                font-size: 12px;
+                padding: 10px 20px;
+                border-radius: 25px;
+                font-weight: 600;
+                font-size: 13px;
                 z-index: 1000;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+                transition: all 0.3s ease;
             }}
+            
             .connected {{
-                background: {COLORS['success_green']};
+                background: linear-gradient(135deg, {COLORS['success_green']} 0%, #229954 100%);
                 color: {COLORS['white']};
+                border: 1px solid {COLORS['success_green']};
             }}
+            
             .disconnected {{
-                background: {COLORS['error_red']};
+                background: linear-gradient(135deg, {COLORS['error_red']} 0%, #c0392b 100%);
                 color: white;
+                border: 1px solid {COLORS['error_red']};
+            }}
+            
+            .info-box {{
+                background: rgba(105, 146, 62, 0.1);
+                padding: 15px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                border: 1px solid rgba(105, 146, 62, 0.3);
+            }}
+            
+            .info-box strong {{
+                color: {COLORS['light_green']};
+                font-weight: 600;
             }}
 
             @media (max-width: 768px) {{
@@ -2053,6 +2550,9 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
                 }}
                 .quick-commands {{
                     grid-template-columns: repeat(2, 1fr);
+                }}
+                .header h1 {{
+                    font-size: 28px;
                 }}
             }}
         </style>
@@ -2075,7 +2575,7 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
                 <div class="card">
                     <h3>📊 Engine Information</h3>
                     <div class="engine-list">
-                        {'<br>'.join(f"<strong>{info}</strong>" for info in engine_info)}
+                        {'<br>'.join(f"<strong>✓</strong> {info}" for info in engine_info)}
                     </div>
 
                     <h3>⚡ Quick Commands</h3>
@@ -2101,7 +2601,7 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
                         </div>
                     </form>
 
-                    <div style="background: rgba(105, 146, 62, 0.1); padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+                    <div class="info-box">
                         <strong>💡 Settings Management:</strong><br>
                         • All engine settings are managed in the GUI application<br>
                         • Settings sync automatically with connected clients<br>
@@ -2130,7 +2630,7 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
 
                 ws.onopen = function(event) {{
                     reconnectAttempts = 0;
-                    connectionStatus.textContent = 'Connected';
+                    connectionStatus.textContent = '✓ Connected';
                     connectionStatus.className = 'connection-indicator connected';
                     console.log('Connected to BetterMint Modded server');
                 }};
@@ -2143,27 +2643,28 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
                     messages.appendChild(message);
                     messages.scrollTop = messages.scrollHeight;
 
+                    // Limit message history
                     if (messages.children.length > 1000) {{
                         messages.removeChild(messages.firstChild);
                     }}
                 }};
 
                 ws.onclose = function(event) {{
-                    connectionStatus.textContent = 'Disconnected';
+                    connectionStatus.textContent = '✗ Disconnected';
                     connectionStatus.className = 'connection-indicator disconnected';
 
                     if (reconnectAttempts < maxReconnectAttempts) {{
                         reconnectAttempts++;
-                        connectionStatus.textContent = `Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`;
+                        connectionStatus.textContent = `Reconnecting... (${{reconnectAttempts}}/${{maxReconnectAttempts}})`;
                         setTimeout(connect, 2000 * reconnectAttempts);
                     }} else {{
-                        connectionStatus.textContent = 'Connection Failed';
+                        connectionStatus.textContent = '✗ Connection Failed';
                     }}
                 }};
 
                 ws.onerror = function(error) {{
                     console.error('WebSocket error:', error);
-                    connectionStatus.textContent = 'Connection Error';
+                    connectionStatus.textContent = '⚠ Connection Error';
                     connectionStatus.className = 'connection-indicator disconnected';
                 }};
             }}
@@ -2172,8 +2673,18 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
                 var input = document.getElementById("messageText");
                 if (ws && ws.readyState === WebSocket.OPEN) {{
                     ws.send(input.value);
+                    
+                    // Add sent command to messages
+                    var messages = document.getElementById('messages');
+                    var message = document.createElement('li');
+                    message.style.color = '#69923e';
+                    message.style.fontWeight = '600';
+                    var content = document.createTextNode('> ' + input.value);
+                    message.appendChild(content);
+                    messages.appendChild(message);
+                    messages.scrollTop = messages.scrollHeight;
                 }} else {{
-                    alert("WebSocket is not connected.");
+                    alert("WebSocket is not connected. Please wait for reconnection.");
                 }}
                 input.value = '';
                 event.preventDefault();
@@ -2182,8 +2693,18 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
             function sendQuickCommand(command) {{
                 if (ws && ws.readyState === WebSocket.OPEN) {{
                     ws.send(command);
+                    
+                    // Add sent command to messages
+                    var messages = document.getElementById('messages');
+                    var message = document.createElement('li');
+                    message.style.color = '#69923e';
+                    message.style.fontWeight = '600';
+                    var content = document.createTextNode('> ' + command);
+                    message.appendChild(content);
+                    messages.appendChild(message);
+                    messages.scrollTop = messages.scrollHeight;
                 }} else {{
-                    alert("WebSocket is not connected.");
+                    alert("WebSocket is not connected. Please wait for reconnection.");
                 }}
             }}
 
@@ -2191,9 +2712,22 @@ def create_fastapi_app(engines, engine_configs, settings_manager):
                 document.getElementById('messages').innerHTML = '';
             }}
 
+            // Auto-connect on load
             window.onload = function() {{
                 connect();
             }};
+
+            // Update connection count periodically
+            setInterval(function() {{
+                if (ws && ws.readyState === WebSocket.OPEN) {{
+                    fetch('/health')
+                        .then(response => response.json())
+                        .then(data => {{
+                            document.getElementById('connectionCount').textContent = data.active_connections;
+                        }})
+                        .catch(error => console.error('Error fetching health:', error));
+                }}
+            }}, 5000);
         </script>
     </body>
 </html>
@@ -2206,6 +2740,10 @@ def main():
     app.setApplicationName("BetterMint Modded")
     app.setApplicationVersion("3.0.0")
     app.setOrganizationName("BetterMint Team")
+    
+    # Enable high DPI support
+    app.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    app.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     window = ChessEngineGUI()
     window.show()
