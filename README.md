@@ -1,4 +1,4 @@
 # BetterMintModded
 A modification of BotSolver's BetterMint
 
-![Downloads](https://img.shields.io/github/downloads/BarioIsCoding/BetterMintModded/total?style=flat&cachebuster=12345)
+![Downloads](https://img.shields.io/github/downloads/BarioIsCoding/BetterMintModded/total?style=for-the-badge)
