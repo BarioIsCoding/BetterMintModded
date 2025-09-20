@@ -3,8 +3,7 @@ A modification of BotSolver's BetterMint 💚🍡
 
 ## Examples
 <img width="1402" height="932" alt="image" src="https://github.com/user-attachments/assets/4d3b3121-e16e-4e54-80dc-d5b53c97efdb" />
-![image](https://github.com/user-attachments/assets/a5202286-9f4f-449f-a159-e26d455d758f)
-
+<img width="1080" height="720" alt="image" src="https://github.com/user-attachments/assets/9a91bb2e-0826-44f4-807b-fdb0282fd133" />
 
 Releases as BETA on **Sunday**. Stay tuned!
 
