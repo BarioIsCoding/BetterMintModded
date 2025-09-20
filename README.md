@@ -1,15 +1,15 @@
 # BetterMint Modded
 **A modification of BotSolver's BetterMint** 💚🍡
 *Bridging the gap between chess engines and human play*
+Releases as BETA on **Sunday**. Stay tuned!
 ![BetterMint Modded Logo](https://github.com/BarioIsCoding/BetterMintModded/blob/main/EngineWS/icons/icon-256.png?raw=true)
-
 ![BetterMint Modded Logo](https://github.com/BarioIsCoding/BetterMintModded/blob/main/EngineWS/icons/icon-32.png?raw=true)   ![Downloads](https://img.shields.io/github/downloads/BarioIsCoding/BetterMintModded/total?style=for-the-badge)
 
 Note: In contrast to ChessMint, __this is not a cheating tool.__ This is a chess learning tool to improve your knowledge and skyrocket your elo! Do **not** use this in real games.
 
 ## Examples 🫱🏻‍🫲🏻
-<img width="1080" height="720" alt="image" src="https://github.com/user-attachments/assets/4d3b3121-e16e-4e54-80dc-d5b53c97efdb" />
-<img width="720" height="720" alt="image" src="https://github.com/user-attachments/assets/9a91bb2e-0826-44f4-807b-fdb0282fd133" />
+<img width="720" height="480" alt="image" src="https://github.com/user-attachments/assets/4d3b3121-e16e-4e54-80dc-d5b53c97efdb" />
+<img width="480" height="480" alt="image" src="https://github.com/user-attachments/assets/9a91bb2e-0826-44f4-807b-fdb0282fd133" />
 
 ## Features 🔥
 ### 🤖 Rich Engine Configuration
@@ -41,8 +41,7 @@ Note: In contrast to ChessMint, __this is not a cheating tool.__ This is a chess
 * Checkmate immediately
 * Rodent premade personalities
 * Rodent custom personalities
-Releases as BETA on **Sunday**. Stay tuned!
-## ♥️ Quality of Life 
+### ♥️ Quality of Life 
 * Web Interface (UCI Log)
 * Verbose logging
 * Performance monitoring
