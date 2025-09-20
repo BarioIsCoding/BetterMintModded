@@ -8,8 +8,8 @@ Releases as BETA on **Sunday**. Stay tuned!
 Note: In contrast to ChessMint, __this is not a cheating tool.__ This is a chess learning tool to improve your knowledge and skyrocket your elo! Do **not** use this in real games.
 
 ## Examples 🫱🏻‍🫲🏻
-<img width="720" height="480" alt="image" src="https://github.com/user-attachments/assets/4d3b3121-e16e-4e54-80dc-d5b53c97efdb" />
 <img width="480" height="480" alt="image" src="https://github.com/user-attachments/assets/9a91bb2e-0826-44f4-807b-fdb0282fd133" />
+<img width="720" height="480" alt="image" src="https://github.com/user-attachments/assets/4d3b3121-e16e-4e54-80dc-d5b53c97efdb" />
 
 ## Features 🔥
 ### 🤖 Rich Engine Configuration
