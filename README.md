@@ -1,5 +1,5 @@
-# BetterMint Modded
-**A modification of BotSolver's BetterMint** 💚🍡
+# BetterMint Modded 🍡
+**A modification of BotSolver's BetterMint** 💚
 
 Releases as BETA on **Sunday**. Stay tuned!
 
