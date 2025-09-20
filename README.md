@@ -6,9 +6,10 @@
 Releases as BETA on **Sunday**. Stay tuned!
 
 ![BetterMint Modded Logo](https://github.com/BarioIsCoding/BetterMintModded/blob/main/EngineWS/icons/icon-256.png?raw=true)
-![BetterMint Modded Logo](https://github.com/BarioIsCoding/BetterMintModded/blob/main/EngineWS/icons/icon-32.png?raw=true)   ![Downloads](https://img.shields.io/github/downloads/BarioIsCoding/BetterMintModded/total?style=for-the-badge)
 
 Note: In contrast to ChessMint, __this is not a cheating tool.__ This is a chess learning tool to improve your knowledge and skyrocket your elo! Do **not** use this in real games.
+
+![BetterMint Modded Logo](https://github.com/BarioIsCoding/BetterMintModded/blob/main/EngineWS/icons/icon-32.png?raw=true)   ![Downloads](https://img.shields.io/github/downloads/BarioIsCoding/BetterMintModded/total?style=for-the-badge)
 
 ## Examples 🫱🏻‍🫲🏻
 <img width="480" height="480" alt="image" src="https://github.com/user-attachments/assets/9a91bb2e-0826-44f4-807b-fdb0282fd133" />
