@@ -60,3 +60,117 @@ Note: In contrast to ChessMint, __this is not a cheating tool.__ This is a chess
 * Config encryption (WIP)
 * Fully free forever
 
+## 🚀 Installation
+
+### Prerequisites
+- **Python 3.8+** (recommended: Python 3.9-3.11)
+- **Windows 10/11** (primary support)
+- **Google Chrome** (for extension)
+- **4GB+ RAM** (8GB+ recommended for Leela)
+
+### Quick Start
+
+1. **Download via MintyInstall (in Releases)**
+
+2. **Run the tool**:
+   ```batch
+   cd BetterMint/EngineWS
+   RunWindows.bat
+   ```
+
+### Manual Installation (MintyInstall still required)
+
+If RunWindows.bat or RunUnix.sh fails:
+
+```batch
+# Navigate to the EngineWS directory
+cd BetterMint/EngineWS
+
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the application
+python main.py
+```
+
+### Chrome Extension Setup
+
+1. Open Chrome and navigate to `chrome://extensions/`
+2. Enable "Developer mode" (top right)
+3. Click "Load unpacked"
+4. Select the `BetterMint/BetterMintModded` folder
+5. The extension should now appear in your extensions list
+
+## 🛠️ Development
+
+### Project Architecture
+- **Frontend**: Chrome extension (JavaScript)
+- **Backend**: Python FastAPI server
+- **GUI**: PySide6 desktop application
+- **Engines**: UCI protocol communication
+- **AI Models**: Maia neural networks via Leela backend
+  
+### Contributing
+This project is in early ALPHA. If you encounter issues:
+1. Check the console/log output
+2. Verify all engines are properly installed
+3. Ensure Chrome extension permissions are granted
+4. Report bugs with detailed logs
+
+## 📋 Requirements
+
+### System Requirements
+- **OS**: Windows 10/11 (primary), Linux/macOS (experimental)
+- **RAM**: 4GB minimum, 8GB+ recommended
+- **Storage**: 2GB free space (more for additional engines/books)
+- **Network**: Internet connection for extension functionality
+
+### Python Dependencies
+See `requirements.txt` for complete list. Key dependencies:
+- `PySide6`: GUI framework
+- `fastapi`: Web server
+- `websockets`: Real-time communication
+- `python-chess`: Chess logic and UCI communication
+- `numpy`: Numerical operations
+
+## 🎓 Attribution
+
+BetterMint Modded is a fork of:
+- **BotSolver's BetterMint** (original fork)
+- **thedemon's ChessMint** (original base project)
+
+### Chess Engines
+- **Stockfish**: Open source chess engine
+- **Leela Chess Zero**: Neural network chess engine
+- **Maia**: Human-like chess AI from Microsoft Research
+
+### Special Thanks
+- Original ChessMint developers
+- BotSolver for the BetterMint fork
+- Stockfish and Leela development teams
+- Maia research team at Microsoft
+
+## 📜 License
+
+This project is free and open source. It will always remain free with no purchases required.
+
+**Note**: Individual chess engines and neural networks may have their own licenses. Please respect the licensing terms of:
+- Stockfish (GPL v3)
+- Leela Chess Zero (GPL v3)
+- Maia weights (research license)
+
+## 🚨 Disclaimer
+
+**ALPHA SOFTWARE**: This is early alpha software with fewer than 10 active users. Expect bugs and incomplete features.
+
+**Usage**: This tool is designed for learning and analysis. Use responsibly and in accordance with chess platform terms of service.
+
+**Support**: As this is a small community project, support is limited. Please be patient and provide detailed bug reports.
+
+*BetterMint Modded - Bridging the gap between chess engines and human play*
