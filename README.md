@@ -11,6 +11,8 @@ Note: In contrast to ChessMint, __this is not a cheating tool.__ This is a chess
 
 ![BetterMint Modded Logo](https://github.com/BarioIsCoding/BetterMintModded/blob/main/EngineWS/icons/icon-32.png?raw=true)   ![Downloads](https://img.shields.io/github/downloads/BarioIsCoding/BetterMintModded/total?style=for-the-badge)
 
+Please join the [Discord server](https://discord.gg/BGmNdcXvt3) for bugs, pull request, future updates, BETA access, and conversation.
+
 ## Examples 🫱🏻‍🫲🏻
 <img width="480" height="480" alt="image" src="https://github.com/user-attachments/assets/9a91bb2e-0826-44f4-807b-fdb0282fd133" />
 <img width="720" height="480" alt="image" src="https://github.com/user-attachments/assets/4d3b3121-e16e-4e54-80dc-d5b53c97efdb" />
