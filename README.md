@@ -1,11 +1,11 @@
 # BetterMint Modded
 **A modification of BotSolver's BetterMint** 💚🍡
 
-*Bridging the gap between chess engines and human play*
-
 Releases as BETA on **Sunday**. Stay tuned!
 
 ![BetterMint Modded Logo](https://github.com/BarioIsCoding/BetterMintModded/blob/main/EngineWS/icons/icon-256.png?raw=true)
+
+*Bridging the gap between chess engines and human play*
 
 Note: In contrast to ChessMint, __this is not a cheating tool.__ This is a chess learning tool to improve your knowledge and skyrocket your elo! Do **not** use this in real games.
 
