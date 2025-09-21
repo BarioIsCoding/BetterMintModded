@@ -3,8 +3,6 @@
 
 ~~Releases as BETA on **Sunday**. Stay tuned!~~ Released!
 
-⚠️ EMERGENCY FIX! IF YOU INSTALLED IT ON 21/09/2025 BEFORE 18:10 UTC, PLEASE REINSTALL.
-
 ![BetterMint Modded Logo](https://github.com/BarioIsCoding/BetterMintModded/blob/main/EngineWS/icons/icon-256.png?raw=true)
 
 *Bridging the gap between chess engines and human play*
