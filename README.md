@@ -13,6 +13,13 @@ Note: In contrast to ChessMint, __this is not a cheating tool.__ This is a chess
 
 Please join the [Discord server](https://discord.gg/BGmNdcXvt3) for bugs, pull request, future updates, BETA access, and conversation.
 
+* Free to use
+* No spyware
+* No microtransactions
+* No ads
+* No donations
+Just a gift by the chess community! 🎁
+
 ## Examples 🫱🏻‍🫲🏻
 <img width="480" height="480" alt="image" src="https://github.com/user-attachments/assets/9a91bb2e-0826-44f4-807b-fdb0282fd133" />
 <img width="720" height="480" alt="image" src="https://github.com/user-attachments/assets/4d3b3121-e16e-4e54-80dc-d5b53c97efdb" />
