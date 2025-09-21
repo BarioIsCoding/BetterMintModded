@@ -190,4 +190,6 @@ In the future, we may replace the library with our custom code (almost done!) to
 ## 💶 Donate
 You can donate via **XMR** to support this project: 
 `88BCjwGV46FAdGXGKRssWd5XL4knBCmgS8w4ird4UeWH9xXqG9nr6yL3coFb6UxWAFFxuX2acTcvUAyN3utGZtcVUskGPAT`
+
+
 *BetterMint Modded - Bridging the gap between chess engines and human play*
