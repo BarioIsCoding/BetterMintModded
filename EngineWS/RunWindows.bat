@@ -12,7 +12,7 @@ echo.
 
 :: Change to script directory
 cd /d "%~dp0"
-
+echo "%~dp0"
 :: Check if Python is installed
 python --version >nul 2>&1
 if %ERRORLEVEL% neq 0 (
@@ -139,6 +139,7 @@ echo.
 
 :: Start the GUI application
 echo Starting BetterMint Modded GUI...
+cd EngineWS
 python main.py
 
 :: Check exit code
@@ -152,9 +153,6 @@ if %ERRORLEVEL% neq 0 (
     echo BetterMint Modded server has been stopped.
     echo.
 )
-
-:: Deactivate virtual environment
-deactivate
 
 echo Press any key to exit...
 pause >nul
