@@ -168,12 +168,16 @@ BetterMint Modded is a fork of:
 
 ## 📜 License
 
-This project is free and open source. It will always remain free with no purchases required.
+This project is free and open source. 
 
 **Note**: Individual chess engines and neural networks may have their own licenses. Please respect the licensing terms of:
 - Stockfish (GPL v3)
 - Leela Chess Zero (GPL v3)
+- Rodent (GPL v3)
 - Maia weights (research license)
+
+We unfortunately use a restrictive copyleft license due to the `python-chess` package.
+In the future, we may replace the library with our custom code (almost done!) to make this project fully open!
 
 ## 🚨 Disclaimer
 
