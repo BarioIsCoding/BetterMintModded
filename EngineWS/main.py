@@ -1,2755 +1,654 @@
-import os
+#!/usr/bin/env python3
+"""
+BetterMint Modded - Advanced Chess Engine Manager
+Fixed main entry point addressing Unicode, Qt, and logging issues
+Added version checking and personalities folder migration
+"""
+
 import sys
-import subprocess
-import asyncio
-import json
+import os
 import time
-import glob
-import socket
-import psutil
-from datetime import datetime
-from threading import Thread, Lock, Event
-from queue import Queue, Empty
+import traceback
+import shutil
+import urllib.request
+import urllib.error
 from pathlib import Path
-import uvicorn
-from contextlib import closing
 
-from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QCheckBox, QComboBox, QSlider, QFrame,
-    QMessageBox, QSpacerItem, QSizePolicy, QScrollArea, QGroupBox,
-    QGridLayout, QTextEdit, QTabWidget, QSpinBox, QLineEdit,
-    QProgressBar, QTableWidget, QTableWidgetItem, QHeaderView,
-    QSplitter, QFileDialog, QMenuBar, QMenu, QStatusBar, QStyle
+# CRITICAL: Fix Windows Unicode console issues FIRST
+if sys.platform == 'win32':
+    try:
+        # Set Windows console to UTF-8 mode
+        os.system('chcp 65001 > nul 2>&1')
+        
+        # Reconfigure stdout/stderr for UTF-8 if possible
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        # Fallback: will handle Unicode issues in logging setup
+        pass
+
+# Record startup time
+STARTUP_TIME = time.time()
+
+# Add project root to Python path
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, PROJECT_ROOT)
+
+# Basic logging setup (fallback if enhanced logging fails)
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    stream=sys.stdout
 )
-from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSettings, QUrl, QByteArray
-from PySide6.QtGui import QFont, QPixmap, QAction, QIcon, QFontDatabase
-from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineScript
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.websockets import WebSocketState
-from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
-
-# Chess.com inspired color scheme 
-COLORS = {
-    'white': '#ffffff',
-    'light_green': '#69923e',
-    'dark_green': '#4e7837',
-    'dark_gray': '#4b4847',
-    'darker_gray': '#2c2b29',
-    'accent_blue': '#3498db',
-    'accent_orange': '#e67e22',
-    'success_green': '#27ae60',
-    'warning_yellow': '#f39c12',
-    'error_red': '#e74c3c'
-}
-
-# Settings model for API
-class Settings(BaseModel):
-    settings: Dict[str, Any]
-
-class PerformanceData(BaseModel):
-    timestamp: float
-    cpu_usage: float
-    memory_usage: float
-    engine_depth: int
-    evaluation_time: float
-
-class ConnectionInfo:
-    def __init__(self, client_id: str, websocket: WebSocket):
-        self.client_id = client_id
-        self.websocket = websocket
-        self.connected_time = datetime.now()
-        self.last_activity = datetime.now()
-        self.status = "Connected"
-
-class ServerThread(QThread):
-    status_changed = Signal(str, str)  # status, color
-    performance_update = Signal(dict)  # performance data
-    connection_update = Signal(list)  # connection info
-    log_message = Signal(str)  # log messages
-
-    def __init__(self, engine_configs, book_config, tablebase_config, settings_manager):
-        super().__init__()
-        self.engine_configs = engine_configs
-        self.book_config = book_config
-        self.tablebase_config = tablebase_config
-        self.settings_manager = settings_manager
-        self.engines = []
-        self.running = False
-        self.server = None
-        self.stop_event = Event()
-        self.connections = {}
-        self.connection_counter = 0
-
-    def update_engines(self, new_configs):
-        """Update engine configurations on the fly"""
-        # Stop old engines
-        for engine in self.engines:
-            engine.quit()
+def safe_log(message, level=logging.INFO):
+    """Safe logging that handles Unicode issues on Windows"""
+    try:
+        # Replace problematic Unicode characters
+        safe_message = str(message)
+        if sys.platform == 'win32':
+            replacements = {
+                '\u2713': '[OK]',    # Checkmark
+                '\u2717': '[FAIL]',  # X mark
+                '\u2022': '-',       # Bullet
+                '\u2192': '->',      # Right arrow
+                '\u2190': '<-',      # Left arrow
+            }
+            for unicode_char, replacement in replacements.items():
+                safe_message = safe_message.replace(unicode_char, replacement)
         
-        self.engines.clear()
-        self.engine_configs = new_configs
-        
-        # Start new engines
-        for config in self.engine_configs:
-            try:
-                engine = EngineChess(
-                    config['path'],
-                    is_maia=config['is_maia'],
-                    maia_config=config['config'],
-                    book_config=self.book_config,
-                    tablebase_config=self.tablebase_config
-                )
-                self.engines.append(engine)
-                self.log_message.emit(f"Loaded engine: {config['name']}")
-            except Exception as e:
-                self.log_message.emit(f"Failed to load engine {config['name']}: {e}")
-
-    def is_port_available(self, port):
-        """Check if port is available"""
-        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
-            result = sock.connect_ex(('localhost', port))
-            return result != 0
-
-    def run(self):
-        # Initialize engines
-        for config in self.engine_configs:
-            try:
-                engine = EngineChess(
-                    config['path'],
-                    is_maia=config['is_maia'],
-                    maia_config=config['config'],
-                    book_config=self.book_config,
-                    tablebase_config=self.tablebase_config
-                )
-                self.engines.append(engine)
-                self.log_message.emit(f"Loaded engine: {config['name']}")
-            except Exception as e:
-                self.log_message.emit(f"Failed to load engine {config['name']}: {e}")
-                continue
-
-        # Initialize Maia engines
-        for engine in self.engines:
-            if engine.is_maia:
-                engine.initialize_maia()
-
-        # Check port availability
-        if not self.is_port_available(8000):
-            self.status_changed.emit("Port 8000 in use", COLORS['error_red'])
-            self.log_message.emit("ERROR: Port 8000 is already in use")
-            return
-
-        # Create FastAPI app
-        app = create_fastapi_app(
-            self.engines, 
-            self.engine_configs, 
-            self.settings_manager,
-            self.connections,
-            self.connection_update,
-            self.log_message
-        )
-
-        # Start server with proper async handling
-        try:
-            self.running = True
-            self.stop_event.clear()
-            self.status_changed.emit("Running", COLORS['success_green'])
+        # Limit message length to prevent spam
+        if len(safe_message) > 500:
+            safe_message = safe_message[:500] + "...truncated"
             
-            config = uvicorn.Config(
-                app=app,
-                host="localhost",
-                port=8000,
-                log_level="error",
-                loop="asyncio"
-            )
-            self.server = uvicorn.Server(config)
-            
-            # Run server in async context
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            async def serve():
-                await self.server.serve()
-            
-            # Monitor for stop signal
-            async def monitor_stop():
-                while not self.stop_event.is_set():
-                    await asyncio.sleep(0.1)
-                await self.server.shutdown()
-            
-            loop.create_task(serve())
-            loop.create_task(monitor_stop())
-            loop.run_forever()
-            
-        except Exception as e:
-            self.log_message.emit(f"Server error: {e}")
-            self.running = False
-            self.status_changed.emit("Error", COLORS['error_red'])
-        finally:
-            # Cleanup
-            loop.close()
-            for engine in self.engines:
-                engine.quit()
-            self.running = False
+        logging.log(level, safe_message)
+    except Exception:
+        # Ultimate fallback
+        print(f"[{level}] {str(message)[:200]}")
 
-    def stop(self):
-        """Properly stop the server"""
-        self.stop_event.set()
-        if self.server:
-            # Server will shutdown via monitor_stop coroutine
-            pass
-        self.running = False
 
-class SettingsManager:
-    def __init__(self):
-        self.settings_file = "betterMint_settings.json"
-        self.default_settings = {
-            # WebSocket Settings
-            "url-api-stockfish": "ws://localhost:8000/ws",
-            "api-stockfish": True,
+def get_current_version() -> str:
+    """Get current version from version file"""
+    try:
+        version_file = Path(PROJECT_ROOT) / "version"
+        if version_file.exists():
+            with open(version_file, 'r', encoding='utf-8') as f:
+                return f.read().strip()
+        else:
+            safe_log("Version file not found, assuming version 3.0.0", logging.WARNING)
+            return "3.0.0"
+    except Exception as e:
+        safe_log(f"Error reading version file: {e}", logging.WARNING)
+        return "3.0.0"
 
-            # Engine Settings
-            "num-cores": 1,
-            "hashtable-ram": 1024,
-            "depth": 15,
-            "mate-finder-value": 5,
-            "multipv": 3,
-            "highmatechance": False,
 
-            # Auto Move Settings
-            "legit-auto-move": False,
-            "auto-move-time": 5000,
-            "auto-move-time-random": 2000,
-            "auto-move-time-random-div": 10,
-            "auto-move-time-random-multi": 1000,
-            "best-move-chance": 30,
-            "random-best-move": False,
-
-            # Premove Settings
-            "premove-enabled": False,
-            "max-premoves": 3,
-            "premove-time": 1000,
-            "premove-time-random": 500,
-            "premove-time-random-div": 100,
-            "premove-time-random-multi": 1,
-
-            # Visual Settings
-            "show-hints": True,
-            "move-analysis": True,
-            "depth-bar": True,
-            "evaluation-bar": True,
-
-            # Misc Settings
-            "text-to-speech": False,
-            "performance-monitoring": False,
-            "auto-save-settings": True,
-            "notification-level": "normal"
-        }
-        self.settings = self.load_settings()
-
-    def load_settings(self):
-        try:
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r') as f:
-                    loaded = json.load(f)
-                    # Merge with defaults to ensure all keys exist
-                    settings = self.default_settings.copy()
-                    settings.update(loaded)
-                    return settings
-        except Exception as e:
-            print(f"Error loading settings: {e}")
-        return self.default_settings.copy()
-
-    def save_settings(self):
-        try:
-            with open(self.settings_file, 'w') as f:
-                json.dump(self.settings, f, indent=2)
-        except Exception as e:
-            print(f"Error saving settings: {e}")
-
-    def get_setting(self, key, default=None):
-        return self.settings.get(key, default)
-
-    def set_setting(self, key, value):
-        self.settings[key] = value
-        if self.get_setting("auto-save-settings", True):
-            self.save_settings()
-
-    def get_all_settings(self):
-        return self.settings.copy()
-
-    def update_settings(self, new_settings):
-        self.settings.update(new_settings)
-        self.save_settings()
-
-class ChessComWebView(QWebEngineView):
-    """Custom web view for Chess.com with extension support"""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
+def get_latest_version() -> str:
+    """Get latest version from GitHub"""
+    try:
+        url = "https://raw.githubusercontent.com/BarioIsCoding/BetterMintModded/refs/heads/main/version"
         
-        # Create custom profile for persistent storage
-        self.profile = QWebEngineProfile("ChessComProfile", self)
-        self.profile.setPersistentStoragePath(os.path.join(os.getcwd(), "chess_com_storage"))
-        self.profile.setCachePath(os.path.join(os.getcwd(), "chess_com_cache"))
+        # Create request with user agent to avoid potential blocking
+        req = urllib.request.Request(url)
+        req.add_header('User-Agent', 'BetterMintModded/3.0.0')
         
-        # Create page with custom profile
-        self.page_obj = QWebEnginePage(self.profile, self)
-        self.setPage(self.page_obj)
-        
-        # Set user agent to Chrome
-        self.profile.setHttpUserAgent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        
-        # Load extension if available
-        self.load_extension()
-        
-        # Load Chess.com
-        self.setUrl(QUrl("https://www.chess.com"))
-        
-    def load_extension(self):
-        """Load BetterMintModded Chrome extension"""
-        try:
-            # Get extension path
-            script_dir = Path(__file__).parent.parent
-            extension_dir = script_dir / "BetterMintModded"
-            manifest_path = extension_dir / "manifest.json"
-            
-            if manifest_path.exists():
-                # Read manifest
-                with open(manifest_path, 'r') as f:
-                    manifest = json.load(f)
-                
-                # Load content scripts
-                if "content_scripts" in manifest:
-                    for content_script in manifest["content_scripts"]:
-                        for js_file in content_script.get("js", []):
-                            js_path = extension_dir / js_file
-                            if js_path.exists():
-                                with open(js_path, 'r') as f:
-                                    js_content = f.read()
-                                    
-                                script = QWebEngineScript()
-                                script.setName(js_file)
-                                script.setSourceCode(js_content)
-                                script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
-                                script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-                                
-                                self.profile.scripts().insert(script)
-                                print(f"Loaded extension script: {js_file}")
-                
-                print("BetterMintModded extension loaded successfully")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                latest_version = response.read().decode('utf-8').strip()
+                safe_log(f"Latest version from GitHub: {latest_version}")
+                return latest_version
             else:
-                print(f"Extension not found at: {extension_dir}")
+                safe_log(f"HTTP {response.status} when checking for updates", logging.WARNING)
+                return None
                 
-        except Exception as e:
-            print(f"Failed to load extension: {e}")
+    except urllib.error.URLError as e:
+        safe_log(f"Network error checking for updates: {e}", logging.WARNING)
+        return None
+    except Exception as e:
+        safe_log(f"Error checking for updates: {e}", logging.WARNING)
+        return None
 
-class ChessEngineGUI(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("BetterMint Modded - Advanced Chess Engine Manager")
-        self.setMinimumSize(1000, 750)
-        self.resize(1400, 900)
+
+def check_for_updates() -> bool:
+    """Check for updates and return True if update is available"""
+    try:
+        current_version = get_current_version()
+        latest_version = get_latest_version()
         
-        # Enable high DPI scaling
-        QApplication.setHighDpiScaleFactorRoundingPolicy(
-            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-        )
-
-        # Load custom font
-        self.load_custom_font()
-
-        # Initialize settings manager
-        self.settings_manager = SettingsManager()
-
-        # Server thread
-        self.server_thread = None
-        self.server_running = False
-
-        # Performance monitoring
-        self.performance_data = []
-        self.performance_timer = QTimer()
-        self.performance_timer.timeout.connect(self.update_performance_metrics)
+        if latest_version is None:
+            safe_log("Could not check for updates - network or server issue")
+            return False
         
-        # Connection update timer
-        self.connection_timer = QTimer()
-        self.connection_timer.timeout.connect(self.request_connection_update)
-        self.connection_timer.start(2000)  # Update every 2 seconds
-
-        self.setup_ui()
-        self.apply_styles()
-        self.setup_menu_bar()
-        self.setup_status_bar()
-        self.load_gui_settings()
+        safe_log(f"Version check: Current={current_version}, Latest={latest_version}")
         
-        # Initialize performance monitoring if enabled
-        if self.settings_manager.get_setting("performance-monitoring", False):
-            self.performance_widget.setVisible(True)
-            self.performance_timer.start(1000)
-
-    def load_custom_font(self):
-        """Load Montserrat font from file"""
-        try:
-            font_path = os.path.join(os.path.dirname(__file__), "Montserrat.ttf")
-            if os.path.exists(font_path):
-                font_id = QFontDatabase.addApplicationFont(font_path)
-                if font_id != -1:
-                    font_families = QFontDatabase.applicationFontFamilies(font_id)
-                    if font_families:
-                        font = QFont(font_families[0])
-                        QApplication.setFont(font)
-                        print(f"Loaded custom font: {font_families[0]}")
-                else:
-                    print("Failed to load Montserrat font, using system default")
-            else:
-                print(f"Font file not found: {font_path}")
-                # Try to use system Montserrat if available
-                font = QFont("Montserrat")
-                if font.family() == "Montserrat":
-                    QApplication.setFont(font)
-        except Exception as e:
-            print(f"Error loading custom font: {e}")
-
-    def setup_menu_bar(self):
-        menubar = self.menuBar()
-
-        # File Menu
-        file_menu = menubar.addMenu('File')
-
-        new_profile_action = QAction('New Profile', self)
-        new_profile_action.triggered.connect(self.new_profile)
-        file_menu.addAction(new_profile_action)
-
-        load_profile_action = QAction('Load Profile', self)
-        load_profile_action.triggered.connect(self.load_profile)
-        file_menu.addAction(load_profile_action)
-
-        save_profile_action = QAction('Save Profile', self)
-        save_profile_action.triggered.connect(self.save_profile)
-        file_menu.addAction(save_profile_action)
-
-        file_menu.addSeparator()
-
-        export_action = QAction('Export Settings', self)
-        export_action.triggered.connect(self.export_settings)
-        file_menu.addAction(export_action)
-
-        import_action = QAction('Import Settings', self)
-        import_action.triggered.connect(self.import_settings)
-        file_menu.addAction(import_action)
-
-        file_menu.addSeparator()
-
-        exit_action = QAction('Exit', self)
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
-
-        # Server Menu
-        server_menu = menubar.addMenu('Server')
-
-        start_action = QAction('Start Server', self)
-        start_action.triggered.connect(self.start_server)
-        server_menu.addAction(start_action)
-
-        stop_action = QAction('Stop Server', self)
-        stop_action.triggered.connect(self.stop_server)
-        server_menu.addAction(stop_action)
-
-        server_menu.addSeparator()
-
-        open_web_action = QAction('Open Web Interface', self)
-        open_web_action.triggered.connect(lambda: os.system("start http://localhost:8000"))
-        server_menu.addAction(open_web_action)
-
-        # Tools Menu
-        tools_menu = menubar.addMenu('Tools')
-
-        performance_action = QAction('Performance Monitor', self)
-        performance_action.setCheckable(True)
-        performance_action.setChecked(self.settings_manager.get_setting("performance-monitoring", False))
-        performance_action.triggered.connect(self.toggle_performance_monitoring)
-        tools_menu.addAction(performance_action)
-
-        clear_logs_action = QAction('Clear Logs', self)
-        clear_logs_action.triggered.connect(self.clear_logs)
-        tools_menu.addAction(clear_logs_action)
-
-        # Help Menu
-        help_menu = menubar.addMenu('Help')
-
-        about_action = QAction('About', self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
-
-    def setup_status_bar(self):
-        self.status_bar = self.statusBar()
-
-        # Status label
-        self.status_label = QLabel("Ready")
-        self.status_bar.addWidget(self.status_label)
-
-        # Server status
-        self.server_status_label = QLabel("Server: Stopped")
-        self.status_bar.addPermanentWidget(self.server_status_label)
-
-        # Connection count
-        self.connection_count_label = QLabel("Connections: 0")
-        self.status_bar.addPermanentWidget(self.connection_count_label)
-
-    def setup_ui(self):
-        # Central widget with main splitter
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-
-        # Create main splitter
-        main_splitter = QSplitter(Qt.Horizontal)
-        main_layout.addWidget(main_splitter)
-
-        # Left panel - Engine and Server controls
-        left_panel = self.create_left_panel()
-        main_splitter.addWidget(left_panel)
-
-        # Right panel - Settings tabs
-        right_panel = self.create_right_panel()
-        main_splitter.addWidget(right_panel)
-
-        # Set splitter sizes (25% left, 75% right)
-        main_splitter.setSizes([350, 1050])
-
-    def create_left_panel(self):
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setSpacing(15)
-
-        # Title
-        title_label = QLabel("BetterMint Modded")
-        title_label.setObjectName("main_title")
-        title_label.setAlignment(Qt.AlignCenter)
-        left_layout.addWidget(title_label)
-
-        # Engine Selection
-        self.setup_engine_section(left_layout)
-
-        # Server Status
-        self.setup_server_status_section(left_layout)
-
-        # Control Buttons
-        self.setup_control_buttons(left_layout)
-
-        # Performance Monitor (initially visible if enabled)
-        self.performance_widget = self.create_performance_widget()
-        self.performance_widget.setVisible(
-            self.settings_manager.get_setting("performance-monitoring", False)
-        )
-        left_layout.addWidget(self.performance_widget)
-
-        left_layout.addStretch()
-        return left_widget
-
-    def create_right_panel(self):
-        # Create tabbed settings interface
-        self.settings_tabs = QTabWidget()
-        self.settings_tabs.setObjectName("settings_tabs")
-
-        # Chess.com Tab (First)
-        self.chess_com_tab = ChessComWebView()
-        self.settings_tabs.addTab(self.chess_com_tab, "Chess.com")
-
-        # Engine Settings Tab
-        self.engine_settings_tab = self.create_engine_settings_tab()
-        self.settings_tabs.addTab(self.engine_settings_tab, "Engine")
-
-        # Auto-Move Settings Tab
-        self.automove_settings_tab = self.create_automove_settings_tab()
-        self.settings_tabs.addTab(self.automove_settings_tab, "Auto-Move")
-
-        # Premove Settings Tab
-        self.premove_settings_tab = self.create_premove_settings_tab()
-        self.settings_tabs.addTab(self.premove_settings_tab, "Premoves")
-
-        # Visual Settings Tab
-        self.visual_settings_tab = self.create_visual_settings_tab()
-        self.settings_tabs.addTab(self.visual_settings_tab, "Visual")
-
-        # Advanced Settings Tab
-        self.advanced_settings_tab = self.create_advanced_settings_tab()
-        self.settings_tabs.addTab(self.advanced_settings_tab, "Advanced")
-
-        # Monitoring Tab
-        self.monitoring_tab = self.create_monitoring_tab()
-        self.settings_tabs.addTab(self.monitoring_tab, "Monitor")
-
-        return self.settings_tabs
-
-    def setup_engine_section(self, layout):
-        engine_group = QGroupBox("Chess Engines")
-        engine_group.setObjectName("group_box")
-
-        engine_layout = QVBoxLayout(engine_group)
-        engine_layout.setSpacing(10)
-
-        # Stockfish
-        self.stockfish_frame = self.create_engine_option(
-            "Stockfish", "World's strongest engine", self.check_stockfish_available()
-        )
-        engine_layout.addWidget(self.stockfish_frame)
-
-        # Leela Chess Zero
-        self.leela_frame = self.create_engine_option(
-            "Leela Chess Zero", "Neural network engine", self.check_leela_available()
-        )
-        engine_layout.addWidget(self.leela_frame)
-
-        # Maia configuration
-        self.setup_maia_options(engine_layout)
-
-        layout.addWidget(engine_group)
-
-    def create_engine_option(self, name, description, available):
-        frame = QFrame()
-        frame.setObjectName("engine_option")
-
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(10, 8, 10, 8)
-
-        # Top row
-        top_layout = QHBoxLayout()
-
-        checkbox = QCheckBox(name)
-        checkbox.setObjectName("engine_checkbox")
-        checkbox.setEnabled(available)
-
-        if name == "Stockfish":
-            self.stockfish_checkbox = checkbox
-            checkbox.toggled.connect(self.on_engine_config_changed)
-        elif name == "Leela Chess Zero":
-            self.leela_checkbox = checkbox
-            checkbox.toggled.connect(self.on_leela_toggle)
-
-        top_layout.addWidget(checkbox)
-        top_layout.addStretch()
-
-        status_label = QLabel("Available" if available else "Not Found")
-        status_label.setObjectName("status_available" if available else "status_unavailable")
-        top_layout.addWidget(status_label)
-
-        layout.addLayout(top_layout)
-
-        # Description
-        desc_label = QLabel(description)
-        desc_label.setObjectName("description")
-        layout.addWidget(desc_label)
-
-        return frame
-
-    def setup_maia_options(self, layout):
-        self.maia_frame = QFrame()
-        self.maia_frame.setObjectName("maia_frame")
-        self.maia_frame.setVisible(False)
-
-        maia_layout = QVBoxLayout(self.maia_frame)
-        maia_layout.setContentsMargins(15, 10, 15, 10)
-
-        self.maia_checkbox = QCheckBox("Enable Maia (Human-like)")
-        self.maia_checkbox.setObjectName("maia_checkbox")
-        self.maia_checkbox.toggled.connect(self.on_maia_toggle)
-        maia_layout.addWidget(self.maia_checkbox)
-
-        # Maia config frame
-        self.maia_config_frame = QFrame()
-        self.maia_config_frame.setObjectName("maia_config")
-        self.maia_config_frame.setVisible(False)
-
-        config_layout = QVBoxLayout(self.maia_config_frame)
-        config_layout.setContentsMargins(10, 10, 10, 10)
-
-        # Strength selection
-        strength_label = QLabel("Maia Strength:")
-        strength_label.setObjectName("config_label")
-        config_layout.addWidget(strength_label)
-
-        self.strength_combo = QComboBox()
-        self.strength_combo.setObjectName("strength_combo")
-        self.strength_combo.currentTextChanged.connect(self.on_engine_config_changed)
-        available_weights = self.get_available_maia_weights()
-        if available_weights:
-            self.strength_combo.addItems(available_weights)
+        # Simple string comparison - assumes semantic versioning
+        if current_version != latest_version:
+            safe_log(f"Update available: {current_version} -> {latest_version}")
+            return True
         else:
-            self.strength_combo.addItem("No weights found")
-            self.strength_combo.setEnabled(False)
-        config_layout.addWidget(self.strength_combo)
-
-        # Nodes per second
-        nodes_label = QLabel("Playing Speed (Nodes/sec):")
-        nodes_label.setObjectName("config_label")
-        config_layout.addWidget(nodes_label)
-
-        nodes_layout = QHBoxLayout()
-        self.nodes_slider = QSlider(Qt.Horizontal)
-        self.nodes_slider.setObjectName("nodes_slider")
-        self.nodes_slider.setMinimum(1)
-        self.nodes_slider.setMaximum(1000)
-        self.nodes_slider.setValue(1)
-        self.nodes_slider.valueChanged.connect(self.update_nodes_display)
-        self.nodes_slider.sliderReleased.connect(self.on_engine_config_changed)
-
-        self.nodes_display = QLabel("0.001")
-        self.nodes_display.setObjectName("nodes_display")
-        self.nodes_display.setMinimumWidth(60)
-
-        nodes_layout.addWidget(self.nodes_slider, 1)
-        nodes_layout.addWidget(self.nodes_display)
-        config_layout.addLayout(nodes_layout)
-
-        maia_layout.addWidget(self.maia_config_frame)
-        layout.addWidget(self.maia_frame)
-
-    def setup_server_status_section(self, layout):
-        status_group = QGroupBox("Server Status")
-        status_group.setObjectName("group_box")
-
-        status_layout = QVBoxLayout(status_group)
-
-        self.status_label_local = QLabel("Server: Stopped")
-        self.status_label_local.setObjectName("status_stopped")
-        status_layout.addWidget(self.status_label_local)
-
-        self.engines_label = QLabel("Active Engines: 0")
-        self.engines_label.setObjectName("status_info")
-        status_layout.addWidget(self.engines_label)
-
-        self.connections_label = QLabel("Connections: 0")
-        self.connections_label.setObjectName("status_info")
-        status_layout.addWidget(self.connections_label)
-
-        layout.addWidget(status_group)
-
-    def setup_control_buttons(self, layout):
-        buttons_layout = QVBoxLayout()
-        buttons_layout.setSpacing(10)
-
-        self.start_button = QPushButton("START SERVER")
-        self.start_button.setObjectName("start_button")
-        self.start_button.setMinimumHeight(45)
-        self.start_button.clicked.connect(self.start_server)
-
-        self.stop_button = QPushButton("STOP SERVER")
-        self.stop_button.setObjectName("stop_button")
-        self.stop_button.setMinimumHeight(45)
-        self.stop_button.setEnabled(False)
-        self.stop_button.clicked.connect(self.stop_server)
-
-        buttons_layout.addWidget(self.start_button)
-        buttons_layout.addWidget(self.stop_button)
-
-        layout.addLayout(buttons_layout)
-
-    def create_performance_widget(self):
-        perf_group = QGroupBox("Performance Monitor")
-        perf_group.setObjectName("group_box")
-
-        perf_layout = QVBoxLayout(perf_group)
-
-        self.cpu_progress = QProgressBar()
-        self.cpu_progress.setObjectName("progress_bar")
-        self.cpu_label = QLabel("CPU: 0%")
-        perf_layout.addWidget(self.cpu_label)
-        perf_layout.addWidget(self.cpu_progress)
-
-        self.memory_progress = QProgressBar()
-        self.memory_progress.setObjectName("progress_bar")
-        self.memory_label = QLabel("Memory: 0 MB")
-        perf_layout.addWidget(self.memory_label)
-        perf_layout.addWidget(self.memory_progress)
-
-        return perf_group
-
-    def create_engine_settings_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(20)
-
-        # Server Configuration
-        server_group = QGroupBox("Server Configuration")
-        server_group.setObjectName("settings_group")
-        server_layout = QGridLayout(server_group)
-
-        # API URL
-        server_layout.addWidget(QLabel("WebSocket URL:"), 0, 0)
-        self.api_url_edit = QLineEdit()
-        self.api_url_edit.setText(self.settings_manager.get_setting("url-api-stockfish"))
-        self.api_url_edit.textChanged.connect(lambda x: self.settings_manager.set_setting("url-api-stockfish", x))
-        server_layout.addWidget(self.api_url_edit, 0, 1)
-
-        # Use API
-        self.api_checkbox = QCheckBox("Use WebSocket API")
-        self.api_checkbox.setChecked(self.settings_manager.get_setting("api-stockfish"))
-        self.api_checkbox.toggled.connect(lambda x: self.settings_manager.set_setting("api-stockfish", x))
-        server_layout.addWidget(self.api_checkbox, 1, 0, 1, 2)
-
-        layout.addWidget(server_group)
-
-        # Engine Configuration
-        engine_group = QGroupBox("Engine Configuration")
-        engine_group.setObjectName("settings_group")
-        engine_layout = QGridLayout(engine_group)
-
-        # Cores
-        engine_layout.addWidget(QLabel("CPU Cores:"), 0, 0)
-        self.cores_spin = QSpinBox()
-        self.cores_spin.setRange(1, 16)
-        self.cores_spin.setValue(self.settings_manager.get_setting("num-cores"))
-        self.cores_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("num-cores", x))
-        engine_layout.addWidget(self.cores_spin, 0, 1)
-
-        # Hash table
-        engine_layout.addWidget(QLabel("Hash Table (MB):"), 1, 0)
-        self.hash_spin = QSpinBox()
-        self.hash_spin.setRange(64, 8192)
-        self.hash_spin.setSingleStep(64)
-        self.hash_spin.setValue(self.settings_manager.get_setting("hashtable-ram"))
-        self.hash_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("hashtable-ram", x))
-        engine_layout.addWidget(self.hash_spin, 1, 1)
-
-        # Depth
-        engine_layout.addWidget(QLabel("Search Depth:"), 2, 0)
-        self.depth_spin = QSpinBox()
-        self.depth_spin.setRange(1, 50)
-        self.depth_spin.setValue(self.settings_manager.get_setting("depth"))
-        self.depth_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("depth", x))
-        engine_layout.addWidget(self.depth_spin, 2, 1)
-
-        # MultiPV
-        engine_layout.addWidget(QLabel("Analysis Lines:"), 3, 0)
-        self.multipv_spin = QSpinBox()
-        self.multipv_spin.setRange(1, 10)
-        self.multipv_spin.setValue(self.settings_manager.get_setting("multipv"))
-        self.multipv_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("multipv", x))
-        engine_layout.addWidget(self.multipv_spin, 3, 1)
-
-        # Mate finder
-        engine_layout.addWidget(QLabel("Mate Finder Distance:"), 4, 0)
-        self.mate_finder_spin = QSpinBox()
-        self.mate_finder_spin.setRange(1, 20)
-        self.mate_finder_spin.setValue(self.settings_manager.get_setting("mate-finder-value"))
-        self.mate_finder_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("mate-finder-value", x))
-        engine_layout.addWidget(self.mate_finder_spin, 4, 1)
-
-        # High mate chance
-        self.mate_chance_checkbox = QCheckBox("Prioritize Mate Search")
-        self.mate_chance_checkbox.setChecked(self.settings_manager.get_setting("highmatechance"))
-        self.mate_chance_checkbox.toggled.connect(lambda x: self.settings_manager.set_setting("highmatechance", x))
-        engine_layout.addWidget(self.mate_chance_checkbox, 5, 0, 1, 2)
-
-        layout.addWidget(engine_group)
-        layout.addStretch()
-
-        return widget
-
-    def create_automove_settings_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(20)
-
-        # Auto-Move Configuration
-        automove_group = QGroupBox("Auto-Move Configuration")
-        automove_group.setObjectName("settings_group")
-        automove_layout = QGridLayout(automove_group)
-
-        # Enable auto-move
-        self.automove_checkbox = QCheckBox("Enable Legit Auto-Move")
-        self.automove_checkbox.setChecked(self.settings_manager.get_setting("legit-auto-move"))
-        self.automove_checkbox.toggled.connect(lambda x: self.settings_manager.set_setting("legit-auto-move", x))
-        automove_layout.addWidget(self.automove_checkbox, 0, 0, 1, 2)
-
-        # Base delay
-        automove_layout.addWidget(QLabel("Base Delay (ms):"), 1, 0)
-        self.automove_delay_spin = QSpinBox()
-        self.automove_delay_spin.setRange(0, 30000)
-        self.automove_delay_spin.setSingleStep(100)
-        self.automove_delay_spin.setValue(self.settings_manager.get_setting("auto-move-time"))
-        self.automove_delay_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("auto-move-time", x))
-        automove_layout.addWidget(self.automove_delay_spin, 1, 1)
-
-        # Random delay
-        automove_layout.addWidget(QLabel("Random Delay (ms):"), 2, 0)
-        self.automove_random_spin = QSpinBox()
-        self.automove_random_spin.setRange(0, 10000)
-        self.automove_random_spin.setSingleStep(100)
-        self.automove_random_spin.setValue(self.settings_manager.get_setting("auto-move-time-random"))
-        self.automove_random_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("auto-move-time-random", x))
-        automove_layout.addWidget(self.automove_random_spin, 2, 1)
-
-        # Best move chance
-        automove_layout.addWidget(QLabel("Best Move Chance (%):"), 3, 0)
-        self.best_move_spin = QSpinBox()
-        self.best_move_spin.setRange(0, 100)
-        self.best_move_spin.setValue(self.settings_manager.get_setting("best-move-chance"))
-        self.best_move_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("best-move-chance", x))
-        automove_layout.addWidget(self.best_move_spin, 3, 1)
-
-        # Random best move
-        self.random_best_checkbox = QCheckBox("Random Best Move Selection")
-        self.random_best_checkbox.setChecked(self.settings_manager.get_setting("random-best-move"))
-        self.random_best_checkbox.toggled.connect(lambda x: self.settings_manager.set_setting("random-best-move", x))
-        automove_layout.addWidget(self.random_best_checkbox, 4, 0, 1, 2)
-
-        layout.addWidget(automove_group)
-
-        # Advanced Timing
-        timing_group = QGroupBox("Advanced Timing Configuration")
-        timing_group.setObjectName("settings_group")
-        timing_layout = QGridLayout(timing_group)
-
-        # Randomization divider
-        timing_layout.addWidget(QLabel("Random Divider:"), 0, 0)
-        self.random_div_spin = QSpinBox()
-        self.random_div_spin.setRange(1, 500)
-        self.random_div_spin.setValue(self.settings_manager.get_setting("auto-move-time-random-div"))
-        self.random_div_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("auto-move-time-random-div", x))
-        timing_layout.addWidget(self.random_div_spin, 0, 1)
-
-        # Randomization multiplier
-        timing_layout.addWidget(QLabel("Random Multiplier:"), 1, 0)
-        self.random_multi_spin = QSpinBox()
-        self.random_multi_spin.setRange(1, 2000)
-        self.random_multi_spin.setValue(self.settings_manager.get_setting("auto-move-time-random-multi"))
-        self.random_multi_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("auto-move-time-random-multi", x))
-        timing_layout.addWidget(self.random_multi_spin, 1, 1)
-
-        layout.addWidget(timing_group)
-        layout.addStretch()
-
-        return widget
-
-    def create_premove_settings_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(20)
-
-        # Premove Configuration
-        premove_group = QGroupBox("Premove Configuration")
-        premove_group.setObjectName("settings_group")
-        premove_layout = QGridLayout(premove_group)
-
-        # Enable premoves
-        self.premove_checkbox = QCheckBox("Enable Premoves")
-        self.premove_checkbox.setChecked(self.settings_manager.get_setting("premove-enabled"))
-        self.premove_checkbox.toggled.connect(lambda x: self.settings_manager.set_setting("premove-enabled", x))
-        premove_layout.addWidget(self.premove_checkbox, 0, 0, 1, 2)
-
-        # Max premoves
-        premove_layout.addWidget(QLabel("Max Premoves:"), 1, 0)
-        self.max_premoves_spin = QSpinBox()
-        self.max_premoves_spin.setRange(1, 10)
-        self.max_premoves_spin.setValue(self.settings_manager.get_setting("max-premoves"))
-        self.max_premoves_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("max-premoves", x))
-        premove_layout.addWidget(self.max_premoves_spin, 1, 1)
-
-        # Premove delay
-        premove_layout.addWidget(QLabel("Premove Delay (ms):"), 2, 0)
-        self.premove_delay_spin = QSpinBox()
-        self.premove_delay_spin.setRange(100, 5000)
-        self.premove_delay_spin.setSingleStep(50)
-        self.premove_delay_spin.setValue(self.settings_manager.get_setting("premove-time"))
-        self.premove_delay_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("premove-time", x))
-        premove_layout.addWidget(self.premove_delay_spin, 2, 1)
-
-        # Premove random
-        premove_layout.addWidget(QLabel("Random Delay (ms):"), 3, 0)
-        self.premove_random_spin = QSpinBox()
-        self.premove_random_spin.setRange(0, 2000)
-        self.premove_random_spin.setSingleStep(50)
-        self.premove_random_spin.setValue(self.settings_manager.get_setting("premove-time-random"))
-        self.premove_random_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("premove-time-random", x))
-        premove_layout.addWidget(self.premove_random_spin, 3, 1)
-
-        layout.addWidget(premove_group)
-
-        # Advanced Premove Timing
-        premove_timing_group = QGroupBox("Advanced Premove Timing")
-        premove_timing_group.setObjectName("settings_group")
-        premove_timing_layout = QGridLayout(premove_timing_group)
-
-        # Premove random divider
-        premove_timing_layout.addWidget(QLabel("Random Divider:"), 0, 0)
-        self.premove_div_spin = QSpinBox()
-        self.premove_div_spin.setRange(1, 500)
-        self.premove_div_spin.setValue(self.settings_manager.get_setting("premove-time-random-div"))
-        self.premove_div_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("premove-time-random-div", x))
-        premove_timing_layout.addWidget(self.premove_div_spin, 0, 1)
-
-        # Premove random multiplier
-        premove_timing_layout.addWidget(QLabel("Random Multiplier:"), 1, 0)
-        self.premove_multi_spin = QSpinBox()
-        self.premove_multi_spin.setRange(1, 100)
-        self.premove_multi_spin.setValue(self.settings_manager.get_setting("premove-time-random-multi"))
-        self.premove_multi_spin.valueChanged.connect(lambda x: self.settings_manager.set_setting("premove-time-random-multi", x))
-        premove_timing_layout.addWidget(self.premove_multi_spin, 1, 1)
-
-        layout.addWidget(premove_timing_group)
-        layout.addStretch()
-
-        return widget
-
-    def create_visual_settings_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(20)
-
-        # Visual Features
-        visual_group = QGroupBox("Visual Features")
-        visual_group.setObjectName("settings_group")
-        visual_layout = QVBoxLayout(visual_group)
-
-        # Show hints
-        self.hints_checkbox = QCheckBox("Show Move Hints")
-        self.hints_checkbox.setChecked(self.settings_manager.get_setting("show-hints"))
-        self.hints_checkbox.toggled.connect(lambda x: self.settings_manager.set_setting("show-hints", x))
-        visual_layout.addWidget(self.hints_checkbox)
-
-        # Move analysis
-        self.analysis_checkbox = QCheckBox("Move Analysis")
-        self.analysis_checkbox.setChecked(self.settings_manager.get_setting("move-analysis"))
-        self.analysis_checkbox.toggled.connect(lambda x: self.settings_manager.set_setting("move-analysis", x))
-        visual_layout.addWidget(self.analysis_checkbox)
-
-        # Depth bar
-        self.depth_bar_checkbox = QCheckBox("Depth Progress Bar")
-        self.depth_bar_checkbox.setChecked(self.settings_manager.get_setting("depth-bar"))
-        self.depth_bar_checkbox.toggled.connect(lambda x: self.settings_manager.set_setting("depth-bar", x))
-        visual_layout.addWidget(self.depth_bar_checkbox)
-
-        # Evaluation bar
-        self.eval_bar_checkbox = QCheckBox("Evaluation Bar")
-        self.eval_bar_checkbox.setChecked(self.settings_manager.get_setting("evaluation-bar"))
-        self.eval_bar_checkbox.toggled.connect(lambda x: self.settings_manager.set_setting("evaluation-bar", x))
-        visual_layout.addWidget(self.eval_bar_checkbox)
-
-        layout.addWidget(visual_group)
-
-        # Audio Features
-        audio_group = QGroupBox("Audio Features")
-        audio_group.setObjectName("settings_group")
-        audio_layout = QVBoxLayout(audio_group)
-
-        # Text to speech
-        self.tts_checkbox = QCheckBox("Text-to-Speech (Best Moves)")
-        self.tts_checkbox.setChecked(self.settings_manager.get_setting("text-to-speech"))
-        self.tts_checkbox.toggled.connect(lambda x: self.settings_manager.set_setting("text-to-speech", x))
-        audio_layout.addWidget(self.tts_checkbox)
-
-        layout.addWidget(audio_group)
-        layout.addStretch()
-
-        return widget
-
-    def create_advanced_settings_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(20)
-
-        # Performance Settings
-        perf_group = QGroupBox("Performance & Monitoring")
-        perf_group.setObjectName("settings_group")
-        perf_layout = QVBoxLayout(perf_group)
-
-        # Performance monitoring
-        self.perf_monitor_checkbox = QCheckBox("Enable Performance Monitoring")
-        self.perf_monitor_checkbox.setChecked(self.settings_manager.get_setting("performance-monitoring"))
-        self.perf_monitor_checkbox.toggled.connect(self.toggle_performance_monitoring)
-        perf_layout.addWidget(self.perf_monitor_checkbox)
-
-        # Auto-save settings
-        self.autosave_checkbox = QCheckBox("Auto-Save Settings")
-        self.autosave_checkbox.setChecked(self.settings_manager.get_setting("auto-save-settings"))
-        self.autosave_checkbox.toggled.connect(lambda x: self.settings_manager.set_setting("auto-save-settings", x))
-        perf_layout.addWidget(self.autosave_checkbox)
-
-        layout.addWidget(perf_group)
-
-        # Notification Settings
-        notif_group = QGroupBox("Notifications")
-        notif_group.setObjectName("settings_group")
-        notif_layout = QGridLayout(notif_group)
-
-        notif_layout.addWidget(QLabel("Notification Level:"), 0, 0)
-        self.notif_combo = QComboBox()
-        self.notif_combo.addItems(["Minimal", "Normal", "Verbose"])
-        current_level = self.settings_manager.get_setting("notification-level", "normal")
-        self.notif_combo.setCurrentText(current_level.title())
-        self.notif_combo.currentTextChanged.connect(lambda x: self.settings_manager.set_setting("notification-level", x.lower()))
-        notif_layout.addWidget(self.notif_combo, 0, 1)
-
-        layout.addWidget(notif_group)
-
-        # Debug Settings
-        debug_group = QGroupBox("Debug & Development")
-        debug_group.setObjectName("settings_group")
-        debug_layout = QVBoxLayout(debug_group)
-
-        # Buttons for debug functions
-        debug_buttons_layout = QHBoxLayout()
-
-        clear_cache_btn = QPushButton("Clear Cache")
-        clear_cache_btn.clicked.connect(self.clear_cache)
-        debug_buttons_layout.addWidget(clear_cache_btn)
-
-        reset_settings_btn = QPushButton("Reset to Defaults")
-        reset_settings_btn.clicked.connect(self.reset_to_defaults)
-        debug_buttons_layout.addWidget(reset_settings_btn)
-
-        debug_layout.addLayout(debug_buttons_layout)
-        layout.addWidget(debug_group)
-
-        layout.addStretch()
-        return widget
-
-    def create_monitoring_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        # Connection Monitor
-        conn_group = QGroupBox("Connection Monitor")
-        conn_group.setObjectName("settings_group")
-        conn_layout = QVBoxLayout(conn_group)
-
-        # Connection table
-        self.connection_table = QTableWidget()
-        self.connection_table.setColumnCount(4)
-        self.connection_table.setHorizontalHeaderLabels(["Client ID", "Connected At", "Last Activity", "Status"])
-        self.connection_table.horizontalHeader().setStretchLastSection(True)
-        self.connection_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        conn_layout.addWidget(self.connection_table)
-
-        layout.addWidget(conn_group)
-
-        # Activity Log
-        log_group = QGroupBox("Activity Log")
-        log_group.setObjectName("settings_group")
-        log_layout = QVBoxLayout(log_group)
-
-        self.activity_log = QTextEdit()
-        self.activity_log.setObjectName("activity_log")
-        self.activity_log.setMaximumHeight(200)
-        self.activity_log.setReadOnly(True)
-        log_layout.addWidget(self.activity_log)
-
-        # Log controls
-        log_controls = QHBoxLayout()
-        clear_log_btn = QPushButton("Clear Log")
-        clear_log_btn.clicked.connect(lambda: self.activity_log.clear())
-        log_controls.addWidget(clear_log_btn)
-
-        export_log_btn = QPushButton("Export Log")
-        export_log_btn.clicked.connect(self.export_log)
-        log_controls.addWidget(export_log_btn)
-
-        log_controls.addStretch()
-        log_layout.addLayout(log_controls)
-
-        layout.addWidget(log_group)
-
-        return widget
-
-    def apply_styles(self):
-        self.setStyleSheet(f"""
-            QMainWindow {{
-                background-color: {COLORS['darker_gray']};
-                color: {COLORS['white']};
-                font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            }}
-
-            QTabWidget#settings_tabs {{
-                background-color: transparent;
-                border: none;
-            }}
-
-            QTabWidget#settings_tabs::pane {{
-                background-color: transparent;
-                border: none;
-                padding: 10px;
-            }}
-
-            QTabWidget#settings_tabs::tab-bar {{
-                alignment: center;
-            }}
-
-            QTabBar::tab {{
-                background-color: {COLORS['dark_gray']};
-                color: {COLORS['white']};
-                padding: 12px 20px;
-                margin: 2px;
-                border-radius: 6px 6px 0px 0px;
-                font-weight: 600;
-                font-size: 13px;
-                min-width: 80px;
-            }}
-
-            QTabBar::tab:selected {{
-                background-color: {COLORS['light_green']};
-                color: {COLORS['white']};
-            }}
-
-            QTabBar::tab:hover {{
-                background-color: {COLORS['dark_green']};
-            }}
-
-            QGroupBox#group_box, QGroupBox#settings_group {{
-                font-weight: 600;
-                font-size: 14px;
-                color: {COLORS['white']};
-                border: 2px solid {COLORS['dark_gray']};
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 15px;
-                background-color: rgba(75, 72, 71, 0.3);
-            }}
-
-            QGroupBox#group_box::title, QGroupBox#settings_group::title {{
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px 0 8px;
-                color: {COLORS['light_green']};
-                background-color: {COLORS['darker_gray']};
-                font-size: 14px;
-            }}
-
-            QLabel#main_title {{
-                font-size: 26px;
-                font-weight: 700;
-                color: {COLORS['light_green']};
-                margin: 10px 0;
-                letter-spacing: 1px;
-            }}
-
-            QFrame#engine_option {{
-                background-color: rgba(75, 72, 71, 0.5);
-                border: 1px solid {COLORS['dark_gray']};
-                border-radius: 6px;
-                margin: 2px;
-            }}
-
-            QCheckBox {{
-                font-weight: 500;
-                color: {COLORS['white']};
-                spacing: 8px;
-                font-size: 13px;
-            }}
-
-            QCheckBox#engine_checkbox, QCheckBox#maia_checkbox {{
-                font-weight: 600;
-                font-size: 14px;
-            }}
-
-            QCheckBox::indicator {{
-                width: 18px;
-                height: 18px;
-                border-radius: 4px;
-                border: 2px solid {COLORS['white']};
-                background-color: transparent;
-            }}
-
-            QCheckBox::indicator:checked {{
-                background-color: {COLORS['light_green']};
-                border-color: {COLORS['light_green']};
-            }}
-
-            QLabel#status_available {{
-                color: {COLORS['success_green']};
-                font-weight: 600;
-                font-size: 12px;
-            }}
-
-            QLabel#status_unavailable {{
-                color: {COLORS['error_red']};
-                font-weight: 600;
-                font-size: 12px;
-            }}
-
-            QLabel#description {{
-                color: rgba(255, 255, 255, 0.8);
-                font-size: 12px;
-                margin-top: 2px;
-            }}
-
-            QLabel#config_label {{
-                color: {COLORS['white']};
-                font-weight: 600;
-                margin-bottom: 5px;
-                font-size: 13px;
-            }}
-
-            QLabel {{
-                color: {COLORS['white']};
-                font-size: 13px;
-            }}
-
-            QComboBox {{
-                background-color: {COLORS['dark_gray']};
-                border: 2px solid {COLORS['light_green']};
-                border-radius: 4px;
-                padding: 8px;
-                color: {COLORS['white']};
-                font-weight: 500;
-                font-size: 13px;
-                min-height: 20px;
-            }}
-
-            QComboBox::drop-down {{
-                border: none;
-                width: 25px;
-            }}
-
-            QComboBox::down-arrow {{
-                image: none;
-                border: 4px solid transparent;
-                border-top: 8px solid {COLORS['white']};
-                margin-right: 8px;
-            }}
-
-            QComboBox QAbstractItemView {{
-                background-color: {COLORS['dark_gray']};
-                color: {COLORS['white']};
-                selection-background-color: {COLORS['light_green']};
-                border: 1px solid {COLORS['light_green']};
-                font-size: 13px;
-            }}
-
-            QSlider#nodes_slider {{
-                height: 25px;
-            }}
-
-            QSlider#nodes_slider::groove:horizontal {{
-                background: {COLORS['dark_gray']};
-                height: 6px;
-                border-radius: 3px;
-            }}
-
-            QSlider#nodes_slider::handle:horizontal {{
-                background: {COLORS['light_green']};
-                width: 20px;
-                height: 20px;
-                border-radius: 10px;
-                margin: -7px 0;
-            }}
-
-            QSlider#nodes_slider::handle:horizontal:hover {{
-                background: {COLORS['dark_green']};
-            }}
-
-            QLabel#nodes_display {{
-                background-color: {COLORS['dark_gray']};
-                border: 2px solid {COLORS['light_green']};
-                border-radius: 4px;
-                padding: 8px;
-                color: {COLORS['white']};
-                font-weight: 600;
-                text-align: center;
-                font-size: 13px;
-            }}
-
-            QLabel#status_stopped {{
-                color: {COLORS['error_red']};
-                font-weight: 600;
-                font-size: 14px;
-            }}
-
-            QLabel#status_running {{
-                color: {COLORS['success_green']};
-                font-weight: 600;
-                font-size: 14px;
-            }}
-
-            QLabel#status_info {{
-                color: rgba(255, 255, 255, 0.9);
-                font-weight: 500;
-                font-size: 13px;
-            }}
-
-            QPushButton#start_button {{
-                background-color: {COLORS['success_green']};
-                color: {COLORS['white']};
-                border: none;
-                border-radius: 6px;
-                font-weight: 700;
-                font-size: 14px;
-                letter-spacing: 0.5px;
-            }}
-
-            QPushButton#start_button:hover {{
-                background-color: #229954;
-            }}
-
-            QPushButton#start_button:pressed {{
-                background-color: #1e7e34;
-            }}
-
-            QPushButton#start_button:disabled {{
-                background-color: rgba(102, 102, 102, 0.5);
-                color: rgba(153, 153, 153, 0.8);
-            }}
-
-            QPushButton#stop_button {{
-                background-color: {COLORS['error_red']};
-                color: {COLORS['white']};
-                border: none;
-                border-radius: 6px;
-                font-weight: 700;
-                font-size: 14px;
-                letter-spacing: 0.5px;
-            }}
-
-            QPushButton#stop_button:hover {{
-                background-color: #c0392b;
-            }}
-
-            QPushButton#stop_button:pressed {{
-                background-color: #a93226;
-            }}
-
-            QPushButton#stop_button:disabled {{
-                background-color: rgba(102, 102, 102, 0.5);
-                color: rgba(153, 153, 153, 0.8);
-            }}
-
-            QSpinBox {{
-                background-color: {COLORS['dark_gray']};
-                border: 2px solid {COLORS['light_green']};
-                border-radius: 4px;
-                padding: 6px;
-                color: {COLORS['white']};
-                font-weight: 500;
-                font-size: 13px;
-                min-height: 20px;
-            }}
-
-            QSpinBox::up-button, QSpinBox::down-button {{
-                background-color: {COLORS['light_green']};
-                width: 20px;
-            }}
-
-            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
-                background-color: {COLORS['dark_green']};
-            }}
-
-            QLineEdit {{
-                background-color: {COLORS['dark_gray']};
-                border: 2px solid {COLORS['light_green']};
-                border-radius: 4px;
-                padding: 8px;
-                color: {COLORS['white']};
-                font-weight: 500;
-                font-size: 13px;
-            }}
-
-            QLineEdit:focus {{
-                border-color: {COLORS['dark_green']};
-            }}
-
-            QProgressBar#progress_bar {{
-                border: 2px solid {COLORS['dark_gray']};
-                border-radius: 4px;
-                text-align: center;
-                color: {COLORS['white']};
-                font-weight: 600;
-                font-size: 12px;
-                background-color: rgba(75, 72, 71, 0.5);
-            }}
-
-            QProgressBar#progress_bar::chunk {{
-                background-color: {COLORS['light_green']};
-                border-radius: 2px;
-            }}
-
-            QTableWidget {{
-                background-color: rgba(75, 72, 71, 0.5);
-                border: 2px solid {COLORS['dark_gray']};
-                border-radius: 4px;
-                color: {COLORS['white']};
-                gridline-color: {COLORS['darker_gray']};
-                font-size: 12px;
-            }}
-
-            QTableWidget::item {{
-                padding: 8px;
-                border-bottom: 1px solid rgba(75, 72, 71, 0.3);
-            }}
-
-            QTableWidget::item:selected {{
-                background-color: {COLORS['light_green']};
-            }}
-
-            QHeaderView::section {{
-                background-color: {COLORS['dark_gray']};
-                color: {COLORS['white']};
-                padding: 8px;
-                border: none;
-                font-weight: 600;
-                font-size: 12px;
-            }}
-
-            QTextEdit#activity_log {{
-                background-color: rgba(75, 72, 71, 0.5);
-                border: 2px solid {COLORS['dark_gray']};
-                border-radius: 4px;
-                color: {COLORS['white']};
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 12px;
-                padding: 8px;
-            }}
-
-            QPushButton {{
-                background-color: {COLORS['light_green']};
-                color: {COLORS['white']};
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: 600;
-                font-size: 13px;
-            }}
-
-            QPushButton:hover {{
-                background-color: {COLORS['dark_green']};
-            }}
-
-            QPushButton:pressed {{
-                background-color: {COLORS['dark_green']};
-            }}
-
-            QStatusBar {{
-                background-color: {COLORS['dark_gray']};
-                color: {COLORS['white']};
-                border-top: 1px solid {COLORS['light_green']};
-                font-size: 12px;
-            }}
-
-            QMenuBar {{
-                background-color: {COLORS['dark_gray']};
-                color: {COLORS['white']};
-                border-bottom: 1px solid {COLORS['light_green']};
-                font-size: 13px;
-            }}
-
-            QMenuBar::item {{
-                background-color: transparent;
-                padding: 8px 12px;
-            }}
-
-            QMenuBar::item:selected {{
-                background-color: {COLORS['light_green']};
-            }}
-
-            QMenu {{
-                background-color: {COLORS['dark_gray']};
-                color: {COLORS['white']};
-                border: 1px solid {COLORS['light_green']};
-                font-size: 13px;
-            }}
-
-            QMenu::item {{
-                padding: 8px 20px;
-            }}
-
-            QMenu::item:selected {{
-                background-color: {COLORS['light_green']};
-            }}
-
-            QSplitter::handle {{
-                background-color: {COLORS['dark_gray']};
-                width: 2px;
-            }}
-
-            QScrollBar:vertical {{
-                background-color: {COLORS['dark_gray']};
-                width: 12px;
-                border-radius: 6px;
-            }}
-
-            QScrollBar::handle:vertical {{
-                background-color: {COLORS['light_green']};
-                border-radius: 6px;
-                min-height: 20px;
-            }}
-
-            QScrollBar::handle:vertical:hover {{
-                background-color: {COLORS['dark_green']};
-            }}
-
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-        """)
-
-    # Event handlers and utility methods
-    def update_nodes_display(self, value):
-        nodes_value = value / 1000.0
-        self.nodes_display.setText(f"{nodes_value:.3f}")
-
-    def on_leela_toggle(self, checked):
-        self.maia_frame.setVisible(checked)
-        if not checked:
-            self.maia_checkbox.setChecked(False)
-        self.on_engine_config_changed()
-
-    def on_maia_toggle(self, checked):
-        self.maia_config_frame.setVisible(checked)
-        self.on_engine_config_changed()
-
-    def on_engine_config_changed(self):
-        """Update engines when configuration changes"""
-        if self.server_running and self.server_thread:
-            selected_engines = self.get_selected_engines()
-            if selected_engines:
-                self.server_thread.update_engines(selected_engines)
-                self.log_activity("Engine configuration updated")
-
-    def get_selected_engines(self):
-        """Get currently selected engine configurations"""
-        selected_engines = []
-
-        if hasattr(self, 'stockfish_checkbox') and self.stockfish_checkbox.isChecked():
-            if self.check_stockfish_available():
-                selected_engines.append({
-                    'path': 'engines/stockfish/stockfish.exe',
-                    'is_maia': False,
-                    'config': {},
-                    'name': 'Stockfish'
-                })
-
-        if hasattr(self, 'leela_checkbox') and self.leela_checkbox.isChecked():
-            if self.check_leela_available():
-                config = {}
-                if hasattr(self, 'maia_checkbox') and self.maia_checkbox.isChecked():
-                    strength = self.strength_combo.currentText()
-                    weights_path = f"weights/maia-{strength}.pb.gz"
-                    if os.path.exists(weights_path):
-                        nodes_value = self.nodes_slider.value() / 1000.0
-                        config = {
-                            'weights_file': weights_path,
-                            'nodes_per_second_limit': nodes_value,
-                            'use_slowmover': False
-                        }
-
-                engine_name = "Leela"
-                if hasattr(self, 'maia_checkbox') and self.maia_checkbox.isChecked():
-                    engine_name += f" + Maia {self.strength_combo.currentText()}"
-
-                selected_engines.append({
-                    'path': 'engines/leela/lc0.exe',
-                    'is_maia': hasattr(self, 'maia_checkbox') and self.maia_checkbox.isChecked(),
-                    'config': config,
-                    'name': engine_name
-                })
-
-        return selected_engines
-
-    def check_stockfish_available(self):
-        return os.path.exists("engines/stockfish/stockfish.exe")
-
-    def check_leela_available(self):
-        return os.path.exists("engines/leela/lc0.exe")
-
-    def get_available_maia_weights(self):
-        weights = []
-        for i in range(1100, 2000, 100):
-            pattern = f"weights/maia-{i}.pb.gz"
-            if os.path.exists(pattern):
-                weights.append(str(i))
-        return weights
-
-    def toggle_performance_monitoring(self, enabled):
-        self.settings_manager.set_setting("performance-monitoring", enabled)
-        self.performance_widget.setVisible(enabled)
-        if enabled:
-            self.performance_timer.start(1000)  # Update every second
-            self.log_activity("Performance monitoring enabled")
-        else:
-            self.performance_timer.stop()
-            self.log_activity("Performance monitoring disabled")
-
-    def update_performance_metrics(self):
-        # Get real performance metrics
-        try:
-            cpu_percent = psutil.cpu_percent()
-            memory_info = psutil.virtual_memory()
-            memory_mb = memory_info.used / (1024 * 1024)
-
-            self.cpu_progress.setValue(int(cpu_percent))
-            self.cpu_label.setText(f"CPU: {cpu_percent:.1f}%")
-
-            self.memory_progress.setValue(int(memory_info.percent))
-            self.memory_label.setText(f"Memory: {memory_mb:.0f} MB")
-
-        except Exception as e:
-            print(f"Error updating performance metrics: {e}")
-
-    def update_connection_table(self, connections):
-        """Update the connection monitor table"""
-        self.connection_table.setRowCount(len(connections))
-        
-        for i, conn_info in enumerate(connections):
-            self.connection_table.setItem(i, 0, QTableWidgetItem(conn_info.get('client_id', 'Unknown')))
-            self.connection_table.setItem(i, 1, QTableWidgetItem(conn_info.get('connected_time', '')))
-            self.connection_table.setItem(i, 2, QTableWidgetItem(conn_info.get('last_activity', '')))
-            self.connection_table.setItem(i, 3, QTableWidgetItem(conn_info.get('status', 'Unknown')))
-        
-        # Update connection count
-        conn_count = len(connections)
-        self.connections_label.setText(f"Connections: {conn_count}")
-        self.connection_count_label.setText(f"Connections: {conn_count}")
-
-    def request_connection_update(self):
-        """Request connection info update from server thread"""
-        if self.server_thread and self.server_running:
-            # Connection info will be sent via signal from server thread
-            pass
-
-    def log_activity(self, message):
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.activity_log.append(f"[{timestamp}] {message}")
-
-    def start_server(self):
-        selected_engines = self.get_selected_engines()
-
-        if not selected_engines:
-            QMessageBox.warning(self, "Warning", "Please select at least one engine")
-            return
-
-        book_config = {}
-        tablebase_config = {}
-
-        try:
-            self.server_thread = ServerThread(selected_engines, book_config, tablebase_config, self.settings_manager)
-            self.server_thread.status_changed.connect(self.on_server_status_changed)
-            self.server_thread.connection_update.connect(self.update_connection_table)
-            self.server_thread.log_message.connect(self.log_activity)
-            self.server_thread.start()
-
-            self.server_running = True
-
-            # Update UI
-            self.status_label_local.setText("Server: Starting...")
-            self.status_label_local.setObjectName("status_running")
-            self.engines_label.setText(f"Active Engines: {len(selected_engines)}")
-            self.start_button.setEnabled(False)
-            self.stop_button.setEnabled(True)
-
-            self.log_activity(f"Server started with {len(selected_engines)} engines")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to start server: {str(e)}")
-            self.server_running = False
-
-    def stop_server(self):
-        if self.server_thread and self.server_thread.isRunning():
-            self.server_thread.stop()
-            self.server_thread.wait(5000)  # Wait up to 5 seconds for clean shutdown
+            safe_log("You are running the latest version")
+            return False
             
-            if self.server_thread.isRunning():
-                self.server_thread.terminate()
-                self.server_thread.wait()
+    except Exception as e:
+        safe_log(f"Error during version check: {e}", logging.ERROR)
+        return False
 
-        self.server_running = False
 
-        self.status_label_local.setText("Server: Stopped")
-        self.status_label_local.setObjectName("status_stopped")
-        self.engines_label.setText("Active Engines: 0")
-        self.start_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-
-        self.log_activity("Server stopped")
+def show_update_dialog(current_version: str, latest_version: str) -> bool:
+    """Show update dialog and return True if user wants to update"""
+    try:
+        # Try tkinter first to avoid QApplication conflicts
+        import tkinter as tk
+        from tkinter import messagebox
         
-        # Clear connection table
-        self.connection_table.setRowCount(0)
-        self.connections_label.setText("Connections: 0")
-        self.connection_count_label.setText("Connections: 0")
-
-    def on_server_status_changed(self, status, color):
-        self.status_label_local.setText(f"Server: {status}")
-        self.server_status_label.setText(f"Server: {status}")
+        # Create hidden root window
+        root = tk.Tk()
+        root.withdraw()
         
-        if status == "Running":
-            self.status_label_local.setObjectName("status_running")
-        else:
-            self.status_label_local.setObjectName("status_stopped")
-        
-        # Re-apply styles to update colors
-        self.status_label_local.style().unpolish(self.status_label_local)
-        self.status_label_local.style().polish(self.status_label_local)
-
-    # Menu actions
-    def new_profile(self):
-        self.settings_manager.settings = self.settings_manager.default_settings.copy()
-        self.load_gui_settings()
-        self.log_activity("New profile created")
-
-    def load_profile(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Load Profile", "", "JSON Files (*.json)")
-        if file_path:
-            try:
-                with open(file_path, 'r') as f:
-                    profile_data = json.load(f)
-                self.settings_manager.settings.update(profile_data)
-                self.load_gui_settings()
-                self.log_activity(f"Profile loaded from {file_path}")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to load profile: {str(e)}")
-
-    def save_profile(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Profile", "", "JSON Files (*.json)")
-        if file_path:
-            try:
-                with open(file_path, 'w') as f:
-                    json.dump(self.settings_manager.settings, f, indent=2)
-                self.log_activity(f"Profile saved to {file_path}")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to save profile: {str(e)}")
-
-    def export_settings(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Export Settings", "betterMint_export.json", "JSON Files (*.json)")
-        if file_path:
-            try:
-                export_data = {
-                    "settings": self.settings_manager.settings,
-                    "export_date": datetime.now().isoformat(),
-                    "version": "3.0.0"
-                }
-                with open(file_path, 'w') as f:
-                    json.dump(export_data, f, indent=2)
-                self.log_activity(f"Settings exported to {file_path}")
-                QMessageBox.information(self, "Success", "Settings exported successfully!")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to export settings: {str(e)}")
-
-    def import_settings(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Import Settings", "", "JSON Files (*.json)")
-        if file_path:
-            try:
-                with open(file_path, 'r') as f:
-                    import_data = json.load(f)
-
-                if "settings" in import_data:
-                    self.settings_manager.settings.update(import_data["settings"])
-                else:
-                    self.settings_manager.settings.update(import_data)
-
-                self.load_gui_settings()
-                self.log_activity(f"Settings imported from {file_path}")
-                QMessageBox.information(self, "Success", "Settings imported successfully!")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to import settings: {str(e)}")
-
-    def clear_logs(self):
-        self.activity_log.clear()
-
-    def export_log(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Export Log", f"betterMint_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt", "Text Files (*.txt)")
-        if file_path:
-            try:
-                with open(file_path, 'w') as f:
-                    f.write(self.activity_log.toPlainText())
-                QMessageBox.information(self, "Success", "Log exported successfully!")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to export log: {str(e)}")
-
-    def clear_cache(self):
-        # Clear any cache files
-        cache_files = glob.glob("*.cache") + glob.glob("*.tmp")
-        for file in cache_files:
-            try:
-                os.remove(file)
-            except:
-                pass
-        self.log_activity("Cache cleared")
-        QMessageBox.information(self, "Success", "Cache cleared successfully!")
-
-    def reset_to_defaults(self):
-        reply = QMessageBox.question(self, "Reset Settings",
-                                    "Are you sure you want to reset all settings to defaults?",
-                                    QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            self.settings_manager.settings = self.settings_manager.default_settings.copy()
-            self.settings_manager.save_settings()
-            self.load_gui_settings()
-            self.log_activity("Settings reset to defaults")
-
-    def show_about(self):
-        QMessageBox.about(self, "About BetterMint Modded",
-                         "BetterMint Modded v3.0.0\n\n"
-                         "Advanced Chess Analysis Tool\n"
-                         "Server-side managed settings\n\n"
-                         "Enhanced by Claude AI\n"
-                         "Original BetterMint by BetterMint Team")
-
-    def load_gui_settings(self):
-        """Load all settings into GUI elements"""
-        try:
-            # Engine settings
-            self.api_url_edit.setText(self.settings_manager.get_setting("url-api-stockfish"))
-            self.api_checkbox.setChecked(self.settings_manager.get_setting("api-stockfish"))
-            self.cores_spin.setValue(self.settings_manager.get_setting("num-cores"))
-            self.hash_spin.setValue(self.settings_manager.get_setting("hashtable-ram"))
-            self.depth_spin.setValue(self.settings_manager.get_setting("depth"))
-            self.multipv_spin.setValue(self.settings_manager.get_setting("multipv"))
-            self.mate_finder_spin.setValue(self.settings_manager.get_setting("mate-finder-value"))
-            self.mate_chance_checkbox.setChecked(self.settings_manager.get_setting("highmatechance"))
-
-            # Auto-move settings
-            self.automove_checkbox.setChecked(self.settings_manager.get_setting("legit-auto-move"))
-            self.automove_delay_spin.setValue(self.settings_manager.get_setting("auto-move-time"))
-            self.automove_random_spin.setValue(self.settings_manager.get_setting("auto-move-time-random"))
-            self.best_move_spin.setValue(self.settings_manager.get_setting("best-move-chance"))
-            self.random_best_checkbox.setChecked(self.settings_manager.get_setting("random-best-move"))
-            self.random_div_spin.setValue(self.settings_manager.get_setting("auto-move-time-random-div"))
-            self.random_multi_spin.setValue(self.settings_manager.get_setting("auto-move-time-random-multi"))
-
-            # Premove settings
-            self.premove_checkbox.setChecked(self.settings_manager.get_setting("premove-enabled"))
-            self.max_premoves_spin.setValue(self.settings_manager.get_setting("max-premoves"))
-            self.premove_delay_spin.setValue(self.settings_manager.get_setting("premove-time"))
-            self.premove_random_spin.setValue(self.settings_manager.get_setting("premove-time-random"))
-            self.premove_div_spin.setValue(self.settings_manager.get_setting("premove-time-random-div"))
-            self.premove_multi_spin.setValue(self.settings_manager.get_setting("premove-time-random-multi"))
-
-            # Visual settings
-            self.hints_checkbox.setChecked(self.settings_manager.get_setting("show-hints"))
-            self.analysis_checkbox.setChecked(self.settings_manager.get_setting("move-analysis"))
-            self.depth_bar_checkbox.setChecked(self.settings_manager.get_setting("depth-bar"))
-            self.eval_bar_checkbox.setChecked(self.settings_manager.get_setting("evaluation-bar"))
-            self.tts_checkbox.setChecked(self.settings_manager.get_setting("text-to-speech"))
-
-            # Advanced settings
-            self.perf_monitor_checkbox.setChecked(self.settings_manager.get_setting("performance-monitoring"))
-            self.autosave_checkbox.setChecked(self.settings_manager.get_setting("auto-save-settings"))
-
-            notif_level = self.settings_manager.get_setting("notification-level", "normal")
-            self.notif_combo.setCurrentText(notif_level.title())
-
-        except Exception as e:
-            print(f"Error loading GUI settings: {e}")
-
-    def closeEvent(self, event):
-        if self.server_running:
-            self.stop_server()
-
-        # Save window state
-        settings = QSettings("BetterMint", "BetterMintModded")
-        settings.setValue("geometry", self.saveGeometry())
-        settings.setValue("windowState", self.saveState())
-
-        event.accept()
-
-# Engine classes and FastAPI setup
-
-def enqueue_output(out, queue):
-    for line in iter(out.readline, b''):
-        queue.put(line)
-    out.close()
-
-class EngineChess:
-    def __init__(self, path_engine, is_maia=False, maia_config=None, book_config=None, tablebase_config=None):
-        self._engine = subprocess.Popen(
-            path_engine,
-            universal_newlines=True,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+        # Show message box
+        result = messagebox.askyesno(
+            "BetterMint Modded - Update Available",
+            f"A new version of BetterMint Modded is available!\n\n"
+            f"Current version: {current_version}\n"
+            f"Latest version: {latest_version}\n\n"
+            f"Would you like to visit the download page?",
+            icon='info'
         )
-        self.queueOutput = Queue()
-        self.thread = Thread(target=enqueue_output, args=(self._engine.stdout, self.queueOutput))
-        self.thread.daemon = True
-        self.thread.start()
-
-        self._command_queue = Queue()
-        self._queue_lock = Lock()
-        self._has_quit_command_been_sent = False
-        self._current_turn = "w"
-        self.is_maia = is_maia
-        self.maia_config = maia_config or {}
-        self.book_config = book_config or {}
-        self.tablebase_config = tablebase_config or {}
-        self.is_initialized = False
-
-        self.opening_book = None
-        self.tablebase_path = None
-        self.setup_book_and_tablebase()
-
-    def setup_book_and_tablebase(self):
-        if self.book_config.get('enabled') and self.book_config.get('book_file'):
-            book_file = self.book_config['book_file']
-            if os.path.exists(book_file):
-                self.opening_book = book_file
-                print(f"Loaded opening book: {book_file}")
-
-        if self.tablebase_config.get('enabled') and self.tablebase_config.get('tablebase_path'):
-            tb_path = self.tablebase_config['tablebase_path']
-            if os.path.exists(tb_path):
-                self.tablebase_path = tb_path
-                print(f"Loaded tablebase path: {tb_path}")
-
-    def put(self, cmd):
-        with self._queue_lock:
-            self._command_queue.put(cmd)
-
-    def send_next_command(self):
-        with self._queue_lock:
-            if not self._command_queue.empty():
-                cmd = self._command_queue.get()
-                if self._engine.stdin and not self._has_quit_command_been_sent:
-                    self._engine.stdin.write(f"{cmd}\n")
-                    self._engine.stdin.flush()
-                    if cmd == "quit":
-                        self._has_quit_command_been_sent = True
-
-    def initialize_maia(self):
-        if self.is_maia and not self.is_initialized:
-            print("Initializing Maia chess engine...")
-
-            self.put("uci")
-            time.sleep(1)
-
-            if 'weights_file' in self.maia_config:
-                self.put(f"setoption name WeightsFile value {self.maia_config['weights_file']}")
-
-            self.put("setoption name Threads value 1")
-            self.put("setoption name MinibatchSize value 1")
-            self.put("setoption name MaxPrefetch value 0")
-
-            nodes_limit = self.maia_config.get('nodes_per_second_limit', 0.001)
-            self.put(f"setoption name NodesPerSecondLimit value {nodes_limit}")
-
-            if self.maia_config.get('use_slowmover', False):
-                self.put("setoption name SlowMover value 0")
-
-            if self.opening_book:
-                self.put(f"setoption name Book value true")
-                self.put(f"setoption name BookFile value {self.opening_book}")
-
-            if self.tablebase_path:
-                self.put(f"setoption name SyzygyPath value {self.tablebase_path}")
-
-            self.put("isready")
-            self.is_initialized = True
-            print("Maia initialization complete!")
-        elif not self.is_maia and not self.is_initialized:
-            self.put("uci")
-            time.sleep(0.5)
-
-            if self.opening_book:
-                for book_option in ["Book", "BookFile", "OwnBook", "UseBook"]:
-                    self.put(f"setoption name {book_option} value true")
-                self.put(f"setoption name BookFile value {self.opening_book}")
-
-            if self.tablebase_path:
-                for tb_option in ["SyzygyPath", "TablebaseePath", "Tablebase", "TbPath"]:
-                    self.put(f"setoption name {tb_option} value {self.tablebase_path}")
-
-            self.put("isready")
-            self.is_initialized = True
-
-    def _read_line(self) -> str:
-        if not self._engine.stdout:
-            raise BrokenPipeError()
-        if self._engine.poll() is not None:
-            raise Exception("The engine process has crashed")
-
-        try:
-            line = self.queueOutput.get_nowait()
-        except Empty:
-            return ""
-
-        return line.strip()
-
-    def read_line(self) -> str:
-        self.send_next_command()
-        return self._read_line()
+        
+        root.destroy()
+        return result
+        
+    except ImportError:
+        # Fallback to console if tkinter not available
+        safe_log("GUI libraries not available, using console prompt")
+        print(f"\n{'='*50}")
+        print("UPDATE AVAILABLE")
+        print(f"{'='*50}")
+        print(f"Current version: {current_version}")
+        print(f"Latest version: {latest_version}")
+        print(f"{'='*50}")
+        
+        while True:
+            response = input("Would you like to visit the download page? (y/n): ").lower().strip()
+            if response in ['y', 'yes']:
+                return True
+            elif response in ['n', 'no']:
+                return False
+            else:
+                print("Please enter 'y' for yes or 'n' for no.")
     
-    def quit(self):
-        """Properly quit the engine"""
-        self.put("quit")
-        time.sleep(0.5)
-        if self._engine.poll() is None:
-            self._engine.terminate()
-            self._engine.wait(timeout=2)
+    except Exception as e:
+        safe_log(f"Error showing update dialog: {e}", logging.ERROR)
+        return False
 
-def create_fastapi_app(engines, engine_configs, settings_manager, connections, connection_update_signal, log_signal):
-    app = FastAPI(title="BetterMint Modded API", version="3.0.0")
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["*"]
-    )
+def open_update_page():
+    """Open the GitHub update page in default browser"""
+    try:
+        import webbrowser
+        update_url = "https://github.com/BarioIsCoding/BetterMintModded/tree/main"
+        webbrowser.open(update_url)
+        safe_log(f"Opened update page: {update_url}")
+    except Exception as e:
+        safe_log(f"Error opening update page: {e}", logging.ERROR)
+        print(f"Please visit: https://github.com/BarioIsCoding/BetterMintModded/tree/main")
 
-    active_connections = set()
-    connection_counter = 0
 
-    @app.get("/api/settings")
-    async def get_settings():
-        """Get all current settings"""
-        return settings_manager.get_all_settings()
-
-    @app.post("/api/settings")
-    async def update_settings(settings: Settings):
-        """Update settings"""
-        try:
-            settings_manager.update_settings(settings.settings)
-            return {"status": "success", "message": "Settings updated"}
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
-    @app.get("/api/settings/{key}")
-    async def get_setting(key: str):
-        """Get a specific setting"""
-        value = settings_manager.get_setting(key)
-        if value is None:
-            raise HTTPException(status_code=404, detail="Setting not found")
-        return {"key": key, "value": value}
-
-    @app.post("/api/settings/{key}")
-    async def set_setting(key: str, value: dict):
-        """Set a specific setting"""
-        try:
-            settings_manager.set_setting(key, value["value"])
-            return {"status": "success", "key": key, "value": value["value"]}
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
-    @app.get("/health")
-    async def health_check():
-        return JSONResponse({
-            "status": "healthy",
-            "engines": len(engines),
-            "active_connections": len(active_connections),
-            "maia_engines": sum(1 for engine in engines if engine.is_maia),
-            "settings_count": len(settings_manager.get_all_settings())
-        })
-
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        nonlocal active_connections, connection_counter, connections
-
-        connection_counter += 1
-        client_id = f"client_{connection_counter}"
-        conn_info = ConnectionInfo(client_id, websocket)
-        connections[client_id] = conn_info
+def migrate_personalities_folder():
+    """Migrate personalities folder from engines/rodent/personalities to root"""
+    try:
+        # Define source and destination paths
+        source_dir = Path(PROJECT_ROOT) / "engines" / "rodent" / "personalities"
+        dest_dir = Path(PROJECT_ROOT) / "personalities"
         
-        active_connections.add(websocket)
-        await websocket.accept()
+        # Check if source directory exists
+        if not source_dir.exists():
+            safe_log("No personalities folder found in engines/rodent/personalities")
+            return True  # Not an error, just nothing to migrate
         
-        # Send connection update
-        conn_list = []
-        for cid, cinfo in connections.items():
-            conn_list.append({
-                'client_id': cinfo.client_id,
-                'connected_time': cinfo.connected_time.strftime("%H:%M:%S"),
-                'last_activity': cinfo.last_activity.strftime("%H:%M:%S"),
-                'status': cinfo.status
-            })
-        connection_update_signal.emit(conn_list)
+        safe_log(f"Found personalities folder at: {source_dir}")
         
-        log_signal.emit(f"New connection: {client_id}")
-
-        try:
-            async def process_client_command(data):
-                nonlocal connections
-                # Update last activity
-                if client_id in connections:
-                    connections[client_id].last_activity = datetime.now()
+        # Create destination directory if it doesn't exist
+        dest_dir.mkdir(exist_ok=True)
+        
+        # Count files to migrate
+        personality_files = list(source_dir.glob("*.txt"))
+        if not personality_files:
+            safe_log("No personality files (.txt) found to migrate")
+            return True
+        
+        safe_log(f"Migrating {len(personality_files)} personality files...")
+        
+        # Migrate each personality file
+        migrated_count = 0
+        for personality_file in personality_files:
+            try:
+                dest_file = dest_dir / personality_file.name
                 
-                if data.startswith("go"):
-                    for engine in engines:
-                        if engine.is_maia:
-                            if "nodes" not in data:
-                                engine.put("go nodes 1")
-                            else:
-                                engine.put(data)
-                        else:
-                            engine.put(data)
-                elif data.startswith("ucinewgame"):
-                    for engine in engines:
-                        engine.put("ucinewgame")
-                        if engine.is_maia:
-                            engine.put("isready")
-                        elif not engine.is_initialized:
-                            engine.initialize_maia()
+                # If destination file already exists, skip it
+                if dest_file.exists():
+                    safe_log(f"Skipping {personality_file.name} - already exists in destination")
+                    continue
+                
+                # Copy the file
+                shutil.copy2(personality_file, dest_file)
+                safe_log(f"Migrated: {personality_file.name}")
+                migrated_count += 1
+                
+            except Exception as e:
+                safe_log(f"Error migrating {personality_file.name}: {e}", logging.WARNING)
+        
+        if migrated_count > 0:
+            safe_log(f"Successfully migrated {migrated_count} personality files")
+            
+            # Try to remove the source directory if it's empty
+            try:
+                remaining_files = list(source_dir.iterdir())
+                if not remaining_files:
+                    source_dir.rmdir()
+                    safe_log("Removed empty source personalities directory")
                 else:
-                    for engine in engines:
-                        engine.put(data)
+                    safe_log(f"Source directory contains {len(remaining_files)} other files, keeping it")
+            except Exception as e:
+                safe_log(f"Could not remove source directory: {e}", logging.WARNING)
+        else:
+            safe_log("No files needed migration")
+        
+        return True
+        
+    except Exception as e:
+        safe_log(f"Error during personalities migration: {e}", logging.ERROR)
+        return False
 
-            async def handle_client():
-                while websocket.client_state == WebSocketState.CONNECTED:
+
+def load_application_icon():
+    """Load application icon from icons directory with fallback support"""
+    try:
+        from PySide6.QtGui import QIcon
+        from PySide6.QtCore import QSize
+        from constants import ICON_DIR, ICON_FILES
+        
+        icon = QIcon()
+        icon_loaded = False
+        
+        for icon_file in ICON_FILES:
+            icon_path = ICON_DIR / icon_file
+            if icon_path.exists():
+                safe_log(f"Loading icon: {icon_path}")
+                
+                # For PNG files with size indicators, add with specific size
+                if icon_file.startswith("icon-") and icon_file.endswith(".png"):
                     try:
-                        data = await websocket.receive_text()
-                        asyncio.create_task(process_client_command(data))
-                    except WebSocketDisconnect:
-                        break
-                    except Exception as e:
-                        log_signal.emit(f"Error receiving data from {client_id}: {e}")
-                        break
+                        size_str = icon_file.replace("icon-", "").replace(".png", "")
+                        size = int(size_str)
+                        icon.addFile(str(icon_path), QSize(size, size))
+                        icon_loaded = True
+                    except ValueError:
+                        # If size parsing fails, add without size
+                        icon.addFile(str(icon_path))
+                        icon_loaded = True
+                else:
+                    # Add without specific size for SVG, ICO, and generic PNG
+                    icon.addFile(str(icon_path))
+                    icon_loaded = True
+        
+        if icon_loaded:
+            safe_log("Application icon loaded successfully")
+            return icon
+        else:
+            safe_log("No icon files found in icons directory", logging.WARNING)
+            return None
+            
+    except ImportError:
+        safe_log("QIcon not available for icon loading", logging.WARNING)
+        return None
+    except Exception as e:
+        safe_log(f"Error loading application icon: {e}", logging.WARNING)
+        return None
 
-            asyncio.create_task(handle_client())
-
-            while True:
-                try:
-                    responses = [engine.read_line() for engine in engines]
-                    responses = list(filter(None, responses))
-
-                    if responses:
-                        for res in responses:
-                            disconnected_connections = set()
-                            for conn in active_connections:
-                                try:
-                                    if conn.client_state == WebSocketState.CONNECTED:
-                                        await conn.send_text(res)
-                                    else:
-                                        disconnected_connections.add(conn)
-                                except Exception as e:
-                                    disconnected_connections.add(conn)
-
-                            active_connections -= disconnected_connections
-                            
-                            # Update connection list
-                            for conn in disconnected_connections:
-                                for cid, cinfo in list(connections.items()):
-                                    if cinfo.websocket == conn:
-                                        del connections[cid]
-                                        log_signal.emit(f"Disconnected: {cid}")
-                                        break
-                            
-                            # Send updated connection list
-                            conn_list = []
-                            for cid, cinfo in connections.items():
-                                conn_list.append({
-                                    'client_id': cinfo.client_id,
-                                    'connected_time': cinfo.connected_time.strftime("%H:%M:%S"),
-                                    'last_activity': cinfo.last_activity.strftime("%H:%M:%S"),
-                                    'status': cinfo.status
-                                })
-                            connection_update_signal.emit(conn_list)
-                    else:
-                        await asyncio.sleep(0.01)
-                except Exception as e:
-                    log_signal.emit(f"Error in main loop: {e}")
-                    break
-
-        except WebSocketDisconnect:
-            pass
+def set_application_icon(app):
+    """Set the application icon for taskbar and system"""
+    try:
+        icon = load_application_icon()
+        if icon and not icon.isNull():
+            app.setWindowIcon(icon)
+            safe_log("Application icon set successfully")
+            return True
+        else:
+            safe_log("Failed to set application icon - no valid icon found", logging.WARNING)
+            return False
+    except Exception as e:
+        safe_log(f"Error setting application icon: {e}", logging.WARNING)
+        return False
+    
+def setup_windows_taskbar_icon():
+    """
+    Set Windows App User Model ID to ensure custom taskbar icon shows
+    Must be called BEFORE creating QApplication
+    """
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            # Set unique App User Model ID for Windows taskbar grouping
+            app_id = 'BetterMintTeam.BetterMintModded.ChessEngine.3.0.0'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+            safe_log("Windows App User Model ID set for taskbar icon")
+            return True
         except Exception as e:
-            log_signal.emit(f"Error in WebSocket: {e}")
-        finally:
-            active_connections.discard(websocket)
-            if client_id in connections:
-                del connections[client_id]
-            
-            # Send updated connection list
-            conn_list = []
-            for cid, cinfo in connections.items():
-                conn_list.append({
-                    'client_id': cinfo.client_id,
-                    'connected_time': cinfo.connected_time.strftime("%H:%M:%S"),
-                    'last_activity': cinfo.last_activity.strftime("%H:%M:%S"),
-                    'status': cinfo.status
-                })
-            connection_update_signal.emit(conn_list)
-            
-            log_signal.emit(f"Connection closed: {client_id}")
-            
-            try:
-                if websocket.client_state == WebSocketState.CONNECTED:
-                    await websocket.close()
-            except:
-                pass
+            safe_log(f"Failed to set Windows App User Model ID: {e}", logging.WARNING)
+            return False
+    return True
 
-    @app.get("/")
-    async def get():
-        engine_info = []
-        for i, config in enumerate(engine_configs):
-            engine_info.append(f"Engine {i+1}: {config['name']}")
+def setup_qt_application():
+    """Set up Qt application with proper high DPI configuration"""
+    try:
+        safe_log("Setting up Qt application")
 
-        return HTMLResponse(f"""<!DOCTYPE html>
-<html>
-    <head>
-        <title>BetterMint Modded - WebSocket Interface</title>
-        <style>
-            @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap');
+        # CRITICAL: Set Windows taskbar ID BEFORE creating QApplication
+        setup_windows_taskbar_icon()
 
-            * {{
-                box-sizing: border-box;
-                margin: 0;
-                padding: 0;
-            }}
+        # Import Qt components
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import Qt
+        
+        # CRITICAL: Set high DPI attributes BEFORE creating QApplication
+        if hasattr(Qt, 'AA_EnableHighDpiScaling'):
+            QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        if hasattr(Qt, 'AA_UseHighDpiPixmaps'):
+            QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+        
+        # Enable better high DPI scaling if available
+        if hasattr(Qt, 'AA_Use96Dpi'):
+            QApplication.setAttribute(Qt.AA_Use96Dpi, False)
+            
+        # Create Qt application
+        app = QApplication(sys.argv)
+        
+        # Set application metadata
+        app.setApplicationName("BetterMint Modded")
+        app.setApplicationVersion("3.0.0")
+        app.setOrganizationName("BetterMint Team")
+        set_application_icon(app)
+        
+        # Enable proper shutdown behavior
+        app.setQuitOnLastWindowClosed(True)
+        
+        safe_log("Qt application configured successfully")
+        return app
+        
+    except ImportError as e:
+        safe_log(f"CRITICAL: PySide6 not available: {e}", logging.CRITICAL)
+        print("ERROR: PySide6 is required but not installed.")
+        print("Install with: pip install PySide6")
+        return None
+    except Exception as e:
+        safe_log(f"CRITICAL: Qt setup failed: {e}", logging.CRITICAL)
+        return None
 
-            body {{
-                font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                background: linear-gradient(135deg, {COLORS['darker_gray']} 0%, {COLORS['dark_gray']} 100%);
-                color: {COLORS['white']};
-                line-height: 1.6;
-                min-height: 100vh;
-            }}
-            
-            .container {{
-                max-width: 1400px;
-                margin: 0 auto;
-                padding: 20px;
-                min-height: 100vh;
-            }}
-            
-            .header {{
-                text-align: center;
-                margin-bottom: 40px;
-                padding: 30px;
-                background: rgba(75, 72, 71, 0.5);
-                border-radius: 12px;
-                backdrop-filter: blur(10px);
-                border: 1px solid rgba(105, 146, 62, 0.3);
-            }}
-            
-            .header h1 {{
-                font-weight: 700;
-                font-size: 36px;
-                color: {COLORS['white']};
-                margin: 0 0 20px 0;
-                letter-spacing: 1px;
-                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-            }}
-            
-            .status {{
-                color: {COLORS['light_green']};
-                font-weight: 600;
-                font-size: 16px;
-                display: inline-block;
-                background: rgba(105, 146, 62, 0.2);
-                padding: 8px 20px;
-                border-radius: 25px;
-                margin: 0 10px;
-                border: 1px solid {COLORS['light_green']};
-            }}
-            
-            .grid {{
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 30px;
-                margin-bottom: 30px;
-            }}
-            
-            .card {{
-                background: rgba(75, 72, 71, 0.5);
-                padding: 25px;
-                border-radius: 12px;
-                border: 1px solid rgba(105, 146, 62, 0.3);
-                backdrop-filter: blur(10px);
-                transition: transform 0.3s ease, box-shadow 0.3s ease;
-            }}
-            
-            .card:hover {{
-                transform: translateY(-2px);
-                box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-            }}
-            
-            .card h3 {{
-                font-weight: 700;
-                margin: 0 0 20px 0;
-                color: {COLORS['light_green']};
-                font-size: 20px;
-                border-bottom: 2px solid {COLORS['light_green']};
-                padding-bottom: 10px;
-            }}
-            
-            .engine-list {{
-                background: rgba(44, 43, 41, 0.5);
-                padding: 15px;
-                border-radius: 8px;
-                border-left: 4px solid {COLORS['light_green']};
-                margin-bottom: 20px;
-                font-size: 14px;
-                line-height: 1.8;
-            }}
-            
-            .quick-commands {{
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-                gap: 10px;
-                margin-bottom: 20px;
-            }}
-            
-            .quick-commands button {{
-                background: linear-gradient(135deg, {COLORS['light_green']} 0%, {COLORS['dark_green']} 100%);
-                color: {COLORS['white']};
-                border: none;
-                padding: 12px 16px;
-                border-radius: 8px;
-                cursor: pointer;
-                font-weight: 600;
-                font-family: 'Montserrat', sans-serif;
-                transition: all 0.3s ease;
-                font-size: 12px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-            }}
-            
-            .quick-commands button:hover {{
-                transform: translateY(-2px);
-                box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-            }}
-            
-            .quick-commands button:active {{
-                transform: translateY(0);
-            }}
-            
-            .input-group {{
-                display: flex;
-                gap: 10px;
-                margin-bottom: 20px;
-            }}
-            
-            #messageText {{
-                flex: 1;
-                padding: 12px 16px;
-                border: 2px solid {COLORS['light_green']};
-                border-radius: 8px;
-                background: rgba(44, 43, 41, 0.5);
-                color: {COLORS['white']};
-                font-family: 'Montserrat', sans-serif;
-                font-size: 14px;
-                outline: none;
-                transition: all 0.3s ease;
-            }}
-            
-            #messageText:focus {{
-                border-color: {COLORS['dark_green']};
-                background: rgba(44, 43, 41, 0.8);
-                box-shadow: 0 0 0 3px rgba(105, 146, 62, 0.2);
-            }}
-            
-            .form-button {{
-                background: linear-gradient(135deg, {COLORS['light_green']} 0%, {COLORS['dark_green']} 100%);
-                color: {COLORS['white']};
-                border: none;
-                padding: 12px 24px;
-                border-radius: 8px;
-                cursor: pointer;
-                font-weight: 600;
-                font-family: 'Montserrat', sans-serif;
-                transition: all 0.3s ease;
-                font-size: 14px;
-                min-width: 80px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-            }}
-            
-            .form-button:hover {{
-                transform: translateY(-2px);
-                box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-            }}
-            
-            .form-button.secondary {{
-                background: linear-gradient(135deg, {COLORS['dark_gray']} 0%, {COLORS['darker_gray']} 100%);
-                border: 2px solid {COLORS['light_green']};
-            }}
-            
-            #messages {{
-                height: 400px;
-                overflow-y: auto;
-                border: 2px solid rgba(105, 146, 62, 0.3);
-                padding: 20px;
-                background: rgba(44, 43, 41, 0.5);
-                border-radius: 8px;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 13px;
-                list-style: none;
-                scrollbar-width: thin;
-                scrollbar-color: {COLORS['light_green']} {COLORS['dark_gray']};
-            }}
-            
-            #messages::-webkit-scrollbar {{
-                width: 10px;
-            }}
-            
-            #messages::-webkit-scrollbar-track {{
-                background: {COLORS['dark_gray']};
-                border-radius: 5px;
-            }}
-            
-            #messages::-webkit-scrollbar-thumb {{
-                background: {COLORS['light_green']};
-                border-radius: 5px;
-            }}
-            
-            #messages::-webkit-scrollbar-thumb:hover {{
-                background: {COLORS['dark_green']};
-            }}
-            
-            #messages li {{
-                margin: 4px 0;
-                color: {COLORS['white']};
-                padding: 4px 0;
-                border-bottom: 1px solid rgba(75, 72, 71, 0.3);
-                transition: background 0.2s ease;
-            }}
-            
-            #messages li:hover {{
-                background: rgba(105, 146, 62, 0.1);
-                padding-left: 8px;
-            }}
-            
-            .connection-indicator {{
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                padding: 10px 20px;
-                border-radius: 25px;
-                font-weight: 600;
-                font-size: 13px;
-                z-index: 1000;
-                box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-                transition: all 0.3s ease;
-            }}
-            
-            .connected {{
-                background: linear-gradient(135deg, {COLORS['success_green']} 0%, #229954 100%);
-                color: {COLORS['white']};
-                border: 1px solid {COLORS['success_green']};
-            }}
-            
-            .disconnected {{
-                background: linear-gradient(135deg, {COLORS['error_red']} 0%, #c0392b 100%);
-                color: white;
-                border: 1px solid {COLORS['error_red']};
-            }}
-            
-            .info-box {{
-                background: rgba(105, 146, 62, 0.1);
-                padding: 15px;
-                border-radius: 8px;
-                margin-bottom: 20px;
-                border: 1px solid rgba(105, 146, 62, 0.3);
-            }}
-            
-            .info-box strong {{
-                color: {COLORS['light_green']};
-                font-weight: 600;
-            }}
+def initialize_enhanced_logging():
+    """Initialize enhanced logging system if available"""
+    try:
+        from constants import setup_logging, main_logger, APP_NAME, APP_VERSION
+        
+        # Set up enhanced logging
+        setup_logging(
+            log_level='INFO',
+            enable_file_logging=True,
+            enable_performance_logging=True
+        )
+        
+        main_logger.info(f"Starting {APP_NAME} v{APP_VERSION}")
+        main_logger.info(f"Project root: {PROJECT_ROOT}")
+        return main_logger
+        
+    except Exception as e:
+        safe_log(f"Enhanced logging failed, using basic logging: {e}", logging.WARNING)
+        return None
 
-            @media (max-width: 768px) {{
-                .grid {{
-                    grid-template-columns: 1fr;
-                }}
-                .quick-commands {{
-                    grid-template-columns: repeat(2, 1fr);
-                }}
-                .header h1 {{
-                    font-size: 28px;
-                }}
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="connection-indicator disconnected" id="connectionStatus">
-            Connecting...
-        </div>
+def check_dependencies():
+    """Check for required dependencies and files"""
+    safe_log("Checking dependencies")
+    
+    missing_components = []
+    warnings = []
+    
+    # Check critical directories
+    required_dirs = ['gui']
+    for dir_name in required_dirs:
+        dir_path = Path(PROJECT_ROOT) / dir_name
+        if not dir_path.exists():
+            missing_components.append(f"Directory: {dir_name}")
+    
+    # Check optional directories
+    optional_dirs = ['engines', 'weights', 'templates', 'logs']
+    for dir_name in optional_dirs:
+        dir_path = Path(PROJECT_ROOT) / dir_name
+        if not dir_path.exists():
+            warnings.append(f"Optional directory missing: {dir_name}")
+            # Create logs directory if missing
+            if dir_name == 'logs':
+                try:
+                    dir_path.mkdir(exist_ok=True)
+                    safe_log(f"Created {dir_name} directory")
+                except Exception:
+                    pass
+    
+    # Check for engine executables
+    engine_warnings = []
+    try:
+        stockfish_path = Path(PROJECT_ROOT) / 'engines' / 'stockfish' / 'stockfish.exe'
+        leela_path = Path(PROJECT_ROOT) / 'engines' / 'leela' / 'lc0.exe'
+        
+        if not stockfish_path.exists():
+            engine_warnings.append("Stockfish engine not found")
+        if not leela_path.exists():
+            engine_warnings.append("Leela Chess Zero engine not found")
+            
+        if engine_warnings:
+            warnings.extend(engine_warnings)
+            if len(engine_warnings) == 2:
+                warnings.append("No chess engines available - limited functionality")
+                
+    except Exception:
+        warnings.append("Could not check engine availability")
+    
+    # Report results
+    if missing_components:
+        safe_log(f"CRITICAL: Missing required components: {missing_components}", logging.ERROR)
+        return False
+    
+    if warnings:
+        for warning in warnings:
+            safe_log(f"WARNING: {warning}", logging.WARNING)
+    
+    safe_log("Dependency check completed")
+    return True
 
-        <div class="container">
-            <div class="header">
-                <h1>♛ BetterMint Modded v3.0.0</h1>
-                <div>
-                    <span class="status">Engines: {len(engines)}</span>
-                    <span class="status">Connections: <span id="connectionCount">{len(active_connections)}</span></span>
-                </div>
-            </div>
-
-            <div class="grid">
-                <div class="card">
-                    <h3>📊 Engine Information</h3>
-                    <div class="engine-list">
-                        {'<br>'.join(f"<strong>✓</strong> {info}" for info in engine_info)}
-                    </div>
-
-                    <h3>⚡ Quick Commands</h3>
-                    <div class="quick-commands">
-                        <button onclick="sendQuickCommand('uci')">UCI Info</button>
-                        <button onclick="sendQuickCommand('isready')">Ready Check</button>
-                        <button onclick="sendQuickCommand('ucinewgame')">New Game</button>
-                        <button onclick="sendQuickCommand('position startpos')">Start Position</button>
-                        <button onclick="sendQuickCommand('go nodes 1')">Quick Move</button>
-                        <button onclick="sendQuickCommand('go depth 10')">Deep Search</button>
-                        <button onclick="sendQuickCommand('go movetime 5000')">5 Second Think</button>
-                        <button onclick="sendQuickCommand('stop')">Stop Analysis</button>
-                    </div>
-                </div>
-
-                <div class="card">
-                    <h3>💬 Send UCI Command</h3>
-                    <form action="" onsubmit="sendMessage(event)">
-                        <div class="input-group">
-                            <input type="text" id="messageText" autocomplete="off" placeholder="Type UCI command (e.g., go depth 15)..."/>
-                            <button type="submit" class="form-button">Send</button>
-                            <button type="button" onclick="clearMessages()" class="form-button secondary">Clear</button>
-                        </div>
-                    </form>
-
-                    <div class="info-box">
-                        <strong>💡 Settings Management:</strong><br>
-                        • All engine settings are managed in the GUI application<br>
-                        • Settings sync automatically with connected clients<br>
-                        • Visit the server GUI for complete configuration
-                    </div>
-                </div>
-            </div>
-
-            <div class="card">
-                <h3>📝 Engine Responses</h3>
-                <ul id='messages'></ul>
-            </div>
-        </div>
-
-        <script>
-            let ws;
-            let reconnectAttempts = 0;
-            const maxReconnectAttempts = 5;
-
-            function connect() {{
-                const connectionStatus = document.getElementById('connectionStatus');
-                connectionStatus.textContent = 'Connecting...';
-                connectionStatus.className = 'connection-indicator disconnected';
-
-                ws = new WebSocket("ws://localhost:8000/ws");
-
-                ws.onopen = function(event) {{
-                    reconnectAttempts = 0;
-                    connectionStatus.textContent = '✓ Connected';
-                    connectionStatus.className = 'connection-indicator connected';
-                    console.log('Connected to BetterMint Modded server');
-                }};
-
-                ws.onmessage = function(event) {{
-                    var messages = document.getElementById('messages');
-                    var message = document.createElement('li');
-                    var content = document.createTextNode(event.data);
-                    message.appendChild(content);
-                    messages.appendChild(message);
-                    messages.scrollTop = messages.scrollHeight;
-
-                    // Limit message history
-                    if (messages.children.length > 1000) {{
-                        messages.removeChild(messages.firstChild);
-                    }}
-                }};
-
-                ws.onclose = function(event) {{
-                    connectionStatus.textContent = '✗ Disconnected';
-                    connectionStatus.className = 'connection-indicator disconnected';
-
-                    if (reconnectAttempts < maxReconnectAttempts) {{
-                        reconnectAttempts++;
-                        connectionStatus.textContent = `Reconnecting... (${{reconnectAttempts}}/${{maxReconnectAttempts}})`;
-                        setTimeout(connect, 2000 * reconnectAttempts);
-                    }} else {{
-                        connectionStatus.textContent = '✗ Connection Failed';
-                    }}
-                }};
-
-                ws.onerror = function(error) {{
-                    console.error('WebSocket error:', error);
-                    connectionStatus.textContent = '⚠ Connection Error';
-                    connectionStatus.className = 'connection-indicator disconnected';
-                }};
-            }}
-
-            function sendMessage(event) {{
-                var input = document.getElementById("messageText");
-                if (ws && ws.readyState === WebSocket.OPEN) {{
-                    ws.send(input.value);
-                    
-                    // Add sent command to messages
-                    var messages = document.getElementById('messages');
-                    var message = document.createElement('li');
-                    message.style.color = '#69923e';
-                    message.style.fontWeight = '600';
-                    var content = document.createTextNode('> ' + input.value);
-                    message.appendChild(content);
-                    messages.appendChild(message);
-                    messages.scrollTop = messages.scrollHeight;
-                }} else {{
-                    alert("WebSocket is not connected. Please wait for reconnection.");
-                }}
-                input.value = '';
-                event.preventDefault();
-            }}
-
-            function sendQuickCommand(command) {{
-                if (ws && ws.readyState === WebSocket.OPEN) {{
-                    ws.send(command);
-                    
-                    // Add sent command to messages
-                    var messages = document.getElementById('messages');
-                    var message = document.createElement('li');
-                    message.style.color = '#69923e';
-                    message.style.fontWeight = '600';
-                    var content = document.createTextNode('> ' + command);
-                    message.appendChild(content);
-                    messages.appendChild(message);
-                    messages.scrollTop = messages.scrollHeight;
-                }} else {{
-                    alert("WebSocket is not connected. Please wait for reconnection.");
-                }}
-            }}
-
-            function clearMessages() {{
-                document.getElementById('messages').innerHTML = '';
-            }}
-
-            // Auto-connect on load
-            window.onload = function() {{
-                connect();
-            }};
-
-            // Update connection count periodically
-            setInterval(function() {{
-                if (ws && ws.readyState === WebSocket.OPEN) {{
-                    fetch('/health')
-                        .then(response => response.json())
-                        .then(data => {{
-                            document.getElementById('connectionCount').textContent = data.active_connections;
-                        }})
-                        .catch(error => console.error('Error fetching health:', error));
-                }}
-            }}, 5000);
-        </script>
-    </body>
-</html>
-""")
-
-    return app
+def create_main_window():
+    """Create the main application window"""
+    try:
+        safe_log("Creating main window")
+        
+        # Import GUI components
+        from gui.main_window import ChessEngineGUI
+        
+        # Create main window
+        window = ChessEngineGUI()
+        
+        safe_log(f"Main window created: {window.windowTitle()}")
+        return window
+        
+    except ImportError as e:
+        safe_log(f"CRITICAL: Failed to import GUI components: {e}", logging.CRITICAL)
+        safe_log(f"Import traceback: {traceback.format_exc()}", logging.DEBUG)
+        return None
+    except Exception as e:
+        safe_log(f"CRITICAL: Failed to create main window: {e}", logging.CRITICAL)
+        safe_log(f"Window creation traceback: {traceback.format_exc()}", logging.DEBUG)
+        return None
 
 def main():
-    app = QApplication(sys.argv)
-    app.setApplicationName("BetterMint Modded")
-    app.setApplicationVersion("3.0.0")
-    app.setOrganizationName("BetterMint Team")
+    """Main entry point with comprehensive error handling"""
     
-    # Enable high DPI support
-    app.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    app.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    # Initialize logging
+    logger = initialize_enhanced_logging()
+    log_func = logger.info if logger else safe_log
+    
+    log_func("=" * 60)
+    log_func("STARTING BetterMint Modded v3.0.0")
+    log_func("=" * 60)
+    
+    exit_code = 1  # Default to error
+    app = None
+    window = None
+    
+    try:
+        # Phase 0: Migrate personalities folder
+        log_func("Phase 0: Migrating personalities folder")
+        migrate_personalities_folder()
+        
+        # Phase 0.5: Check for updates
+        log_func("Phase 0.5: Checking for updates")
+        try:
+            if check_for_updates():
+                current_version = get_current_version()
+                latest_version = get_latest_version()
+                
+                if latest_version and show_update_dialog(current_version, latest_version):
+                    open_update_page()
+                    # Continue running the application after showing update
+                    log_func("Update dialog shown, continuing with application startup")
+        except Exception as e:
+            safe_log(f"Update check failed: {e}", logging.WARNING)
+            log_func("Continuing with application startup despite update check failure")
+        
+        # Phase 1: Dependency check
+        log_func("Phase 1: Dependency validation")
+        if not check_dependencies():
+            safe_log("CRITICAL: Dependency check failed", logging.ERROR)
+            print("\nERROR: Missing required components.")
+            print("Please ensure all necessary files are present.")
+            input("Press Enter to exit...")
+            return 1
+        
+        # Phase 2: Qt application setup
+        log_func("Phase 2: Qt application initialization")
+        app = setup_qt_application()
+        if not app:
+            return 1
+        
+        # Phase 3: Main window creation
+        log_func("Phase 3: Main window creation")
+        window = create_main_window()
+        if not window:
+            safe_log("CRITICAL: Main window creation failed", logging.ERROR)
+            return 1
+        
+        # Phase 4: Display window
+        log_func("Phase 4: Displaying main window")
+        try:
+            window.show()
+            
+            startup_duration = time.time() - STARTUP_TIME
+            log_func(f"Application started successfully in {startup_duration:.2f} seconds")
+            log_func(f"Main window visible: {window.isVisible()}")
+            
+        except Exception as e:
+            safe_log(f"ERROR: Failed to display window: {e}", logging.ERROR)
+            return 1
+        
+        # Phase 5: Run event loop
+        log_func("Phase 5: Starting Qt event loop")
+        try:
+            exit_code = app.exec()
+            log_func(f"Application exited with code: {exit_code}")
+            
+        except KeyboardInterrupt:
+            log_func("Application interrupted by user")
+            exit_code = 0
+            
+    except Exception as e:
+        safe_log(f"CRITICAL ERROR in main(): {e}", logging.CRITICAL)
+        safe_log(f"Main error traceback: {traceback.format_exc()}", logging.DEBUG)
+        
+        # Show error dialog if Qt is available
+        try:
+            if app and window:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.critical(
+                    window,
+                    "Critical Error",
+                    f"BetterMint Modded encountered a critical error:\n\n{str(e)}\n\n"
+                    "Check the console and log files for detailed information."
+                )
+        except Exception:
+            # Fallback to console error display
+            print(f"\nCRITICAL ERROR: {e}")
+            print("Check logs for detailed information.")
+            input("Press Enter to exit...")
+        
+        exit_code = 1
+    
+    finally:
+        # Cleanup
+        try:
+            if window:
+                window.close()
+            if app:
+                app.quit()
+        except Exception as cleanup_error:
+            safe_log(f"Cleanup error: {cleanup_error}", logging.WARNING)
+        
+        total_runtime = time.time() - STARTUP_TIME
+        log_func(f"Total runtime: {total_runtime:.2f} seconds")
+        log_func("=" * 60)
+    
+    return exit_code
 
-    window = ChessEngineGUI()
-    window.show()
-
-    sys.exit(app.exec())
-
+def handle_exception(exc_type, exc_value, exc_traceback):
+    """Global exception handler for unhandled exceptions"""
+    if issubclass(exc_type, KeyboardInterrupt):
+        # Handle Ctrl+C gracefully
+        safe_log("Application interrupted by user", logging.INFO)
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    
+    # Log unhandled exception
+    safe_log("UNHANDLED EXCEPTION:", logging.CRITICAL)
+    safe_log(f"Type: {exc_type.__name__}", logging.CRITICAL)
+    safe_log(f"Value: {exc_value}", logging.CRITICAL)
+    safe_log(f"Traceback: {''.join(traceback.format_tb(exc_traceback))}", logging.CRITICAL)
+    
+    # Show error to user
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(
+            "Unhandled Exception",
+            f"An unhandled exception occurred:\n\n{exc_type.__name__}: {exc_value}\n\n"
+            "Check the console and log files for detailed information."
+        )
+    except Exception:
+        print(f"\nUNHANDLED EXCEPTION: {exc_type.__name__}: {exc_value}")
+        print("Check logs for detailed information.")
+    
+    # Call the default exception handler
+    sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
 if __name__ == "__main__":
-    main()
+    # Set up global exception handler
+    sys.excepthook = handle_exception
+    
+    # Ensure we're in the correct directory
+    os.chdir(PROJECT_ROOT)
+    
+    try:
+        exit_code = main()
+        sys.exit(exit_code)
+    except Exception as fatal_error:
+        safe_log(f"FATAL ERROR: {fatal_error}", logging.CRITICAL)
+        print(f"FATAL ERROR: {fatal_error}")
+        sys.exit(1)

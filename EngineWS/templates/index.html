@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BetterMint Modded - WebSocket Interface</title>
+    <style>
+        :root {
+            --bg-dark: #2c2b29;
+            --bg-darker: #1a1a1a;
+            --text-primary: #ffffff;
+            --text-secondary: #cccccc;
+            --accent-green: #69923e;
+            --accent-blue: #3498db;
+            --accent-orange: #e67e22;
+            --error-red: #e74c3c;
+            --success-green: #27ae60;
+            --border-color: #4b4847;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-darker);
+            color: var(--text-primary);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header .version {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .status-card {
+            background-color: var(--bg-dark);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .status-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .status-card h3 {
+            color: var(--accent-green);
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .status-card .value {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+
+        .status-card.connected .value {
+            color: var(--success-green);
+        }
+
+        .status-card.disconnected .value {
+            color: var(--error-red);
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .panel h2 {
+            color: var(--accent-green);
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--accent-green);
+        }
+
+        .command-input {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .command-input input {
+            flex: 1;
+            padding: 10px;
+            background-color: var(--bg-darker);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .command-input input:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+
+        .command-input button {
+            padding: 10px 20px;
+            background-color: var(--accent-green);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+
+        .command-input button:hover {
+            background-color: #4e7837;
+        }
+
+        .command-input button:disabled {
+            background-color: #666;
+            cursor: not-allowed;
+        }
+
+        .quick-commands {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .quick-commands button {
+            padding: 8px 15px;
+            background-color: var(--accent-blue);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background-color 0.2s;
+        }
+
+        .quick-commands button:hover {
+            background-color: #2980b9;
+        }
+
+        .messages {
+            height: 400px;
+            overflow-y: auto;
+            background-color: var(--bg-darker);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .message {
+            margin-bottom: 8px;
+            padding: 5px;
+            border-radius: 3px;
+            word-wrap: break-word;
+        }
+
+        .message.sent {
+            background-color: rgba(52, 152, 219, 0.1);
+            border-left: 3px solid var(--accent-blue);
+        }
+
+        .message.received {
+            background-color: rgba(105, 146, 62, 0.1);
+            border-left: 3px solid var(--accent-green);
+        }
+
+        .message.error {
+            background-color: rgba(231, 76, 60, 0.1);
+            border-left: 3px solid var(--error-red);
+            color: #ff6b6b;
+        }
+
+        .message.info {
+            background-color: rgba(230, 126, 34, 0.1);
+            border-left: 3px solid var(--accent-orange);
+        }
+
+        .message .timestamp {
+            color: var(--text-secondary);
+            font-size: 11px;
+            margin-right: 10px;
+        }
+
+        .connection-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+            animation: pulse 2s infinite;
+        }
+
+        .connection-indicator.connected {
+            background-color: var(--success-green);
+        }
+
+        .connection-indicator.disconnected {
+            background-color: var(--error-red);
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .engine-info {
+            background-color: var(--bg-darker);
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+
+        .engine-info h3 {
+            color: var(--accent-orange);
+            margin-bottom: 10px;
+        }
+
+        .engine-list {
+            list-style: none;
+        }
+
+        .engine-list li {
+            padding: 5px 0;
+            color: var(--text-secondary);
+        }
+
+        .engine-list li:before {
+            content: "✓ ";
+            color: var(--success-green);
+            font-weight: bold;
+        }
+
+        .clear-button {
+            margin-top: 10px;
+            padding: 8px 15px;
+            background-color: var(--error-red);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .clear-button:hover {
+            background-color: #c0392b;
+        }
+
+        /* Scrollbar styling */
+        .messages::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .messages::-webkit-scrollbar-track {
+            background: var(--bg-darker);
+        }
+
+        .messages::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        .messages::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-green);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 BetterMint Modded</h1>
+            <div class="version">Version {{ version }} - WebSocket Interface</div>
+        </div>
+
+        <div class="status-grid">
+            <div class="status-card" id="connection-card">
+                <h3>Connection Status</h3>
+                <div class="value">
+                    <span class="connection-indicator disconnected" id="connection-indicator"></span>
+                    <span id="connection-status">Disconnected</span>
+                </div>
+            </div>
+            <div class="status-card">
+                <h3>Active Engines</h3>
+                <div class="value" id="engine-count">{{ engine_count }}</div>
+            </div>
+            <div class="status-card">
+                <h3>Messages</h3>
+                <div class="value" id="message-count">0</div>
+            </div>
+            <div class="status-card">
+                <h3>Intelligence</h3>
+                <div class="value">{{ intelligence_active }}</div>
+            </div>
+        </div>
+
+        <div class="main-grid">
+            <div class="panel">
+                <h2>🎮 Engine Control</h2>
+
+                <div class="command-input">
+                    <input type="text" id="command-input"
+                        placeholder="Enter UCI command (e.g., 'uci', 'position startpos', 'go movetime 1000')" />
+                    <button id="send-button" disabled>Send</button>
+                </div>
+
+                <div class="quick-commands">
+                    <button onclick="sendCommand('uci')">UCI</button>
+                    <button onclick="sendCommand('isready')">Is Ready</button>
+                    <button onclick="sendCommand('ucinewgame')">New Game</button>
+                    <button onclick="sendCommand('position startpos')">Start Position</button>
+                    <button onclick="sendCommand('go movetime 1000')">Go (1s)</button>
+                    <button onclick="sendCommand('go depth 10')">Go (Depth 10)</button>
+                    <button onclick="sendCommand('stop')">Stop</button>
+                    <button onclick="sendCommand('quit')">Quit</button>
+                </div>
+
+                <div class="engine-info">
+                    <h3>Configured Engines</h3>
+                    <ul class="engine-list" id="engine-list">
+                        {{ engine_info | safe }}
+                    </ul>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>📡 Message Log</h2>
+                <div class="messages" id="messages"></div>
+                <button class="clear-button" onclick="clearMessages()">Clear Messages</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = {{ max_reconnect_attempts }};
+        const maxMessageHistory = {{ max_message_history }};
+        let messageCounter = 0;
+
+        function connect() {
+            const wsUrl = "{{ ws_url }}";
+            addMessage(`Connecting to ${wsUrl}...`, 'info');
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function (event) {
+                console.log("WebSocket connected");
+                reconnectAttempts = 0;
+                updateConnectionStatus(true);
+                addMessage("✅ Connected to server", 'info');
+                document.getElementById('send-button').disabled = false;
+
+                // Send initial UCI command
+                setTimeout(() => {
+                    sendCommand('uci');
+                }, 500);
+            };
+
+            ws.onmessage = function (event) {
+                console.log("Received:", event.data);
+                addMessage(event.data, 'received');
+            };
+
+            ws.onerror = function (error) {
+                console.error("WebSocket error:", error);
+                addMessage(`❌ Connection error`, 'error');
+            };
+
+            ws.onclose = function (event) {
+                console.log("WebSocket closed");
+                updateConnectionStatus(false);
+                document.getElementById('send-button').disabled = true;
+
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    addMessage(`Connection lost. Reconnecting (${reconnectAttempts}/${maxReconnectAttempts})...`, 'info');
+                    setTimeout(connect, 2000);
+                } else {
+                    addMessage("❌ Maximum reconnection attempts reached", 'error');
+                }
+            };
+        }
+
+        function sendCommand(command) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(command);
+                addMessage(command, 'sent');
+
+                // Clear input if sent from text field
+                const input = document.getElementById('command-input');
+                if (input.value === command) {
+                    input.value = '';
+                }
+            } else {
+                addMessage("❌ Not connected to server", 'error');
+            }
+        }
+
+        function addMessage(message, type = 'received') {
+            messageCounter++;
+            const messages = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+
+            const timestamp = new Date().toLocaleTimeString();
+            messageDiv.innerHTML = `<span class="timestamp">[${timestamp}]</span>${escapeHtml(message)}`;
+
+            messages.appendChild(messageDiv);
+            messages.scrollTop = messages.scrollHeight;
+
+            // Update message counter
+            document.getElementById('message-count').textContent = messageCounter;
+
+            // Limit message history
+            if (messages.children.length > maxMessageHistory) {
+                messages.removeChild(messages.firstChild);
+            }
+        }
+
+        function clearMessages() {
+            const messages = document.getElementById('messages');
+            messages.innerHTML = '';
+            messageCounter = 0;
+            document.getElementById('message-count').textContent = '0';
+            addMessage("Message log cleared", 'info');
+        }
+
+        function updateConnectionStatus(connected) {
+            const indicator = document.getElementById('connection-indicator');
+            const status = document.getElementById('connection-status');
+            const card = document.getElementById('connection-card');
+
+            if (connected) {
+                indicator.className = 'connection-indicator connected';
+                status.textContent = 'Connected';
+                card.classList.add('connected');
+                card.classList.remove('disconnected');
+            } else {
+                indicator.className = 'connection-indicator disconnected';
+                status.textContent = 'Disconnected';
+                card.classList.add('disconnected');
+                card.classList.remove('connected');
+            }
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        // Setup event listeners
+        document.addEventListener('DOMContentLoaded', function () {
+            const input = document.getElementById('command-input');
+            const button = document.getElementById('send-button');
+
+            input.addEventListener('keypress', function (e) {
+                if (e.key === 'Enter') {
+                    sendCommand(input.value);
+                }
+            });
+
+            button.addEventListener('click', function () {
+                sendCommand(input.value);
+            });
+
+            // Start connection
+            connect();
+        });
+    </script>
+</body>
+
+</html>
