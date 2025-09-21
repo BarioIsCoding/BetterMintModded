@@ -18,6 +18,7 @@ Please join the [Discord server](https://discord.gg/BGmNdcXvt3) for bugs, pull r
 * No microtransactions
 * No ads
 * No donations
+  
 Just a gift by the chess community! 🎁
 
 ## Examples 🫱🏻‍🫲🏻
