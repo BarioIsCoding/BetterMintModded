@@ -1,53 +1,60 @@
-# BetterMint Modded - Enhanced Server Dependencies
+# BetterMint Modded Enhanced Requirements
+# Core web framework and async support
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+websockets==12.0
 
-# Core Framework
-fastapi>=0.104.1
-uvicorn[standard]>=0.24.0
-websockets>=12.0
+# Chess logic and validation
+python-chess 
+# HTTP client and web utilities
+httpx==0.25.0
+requests==2.31.0
+pillow
 
-# Data Models and Validation
-pydantic>=2.5.0
+# Data validation and parsing
+pydantic==2.5.0
+python-multipart==0.0.6
 
-# CORS Middleware
-python-multipart>=0.0.6
+# System monitoring and process management
+psutil==5.9.6
 
-# GUI Framework
-PySide6>=6.6.0
+# GUI framework (Qt6-based)
+PySide6
 
-# System Monitoring
-psutil>=5.9.6
+# Web engine for embedded browser (if needed)
+# PySide6-WebEngine==6.6.0  # Uncomment if using embedded browser
 
-# JSON Handling (built-in but explicit for clarity)
-# json - built-in
+# JSON and data handling
+python-json-logger==2.0.7
 
-# Threading and Async Support (built-in)
-# asyncio - built-in
-# threading - built-in
+# File and path utilities  
+pathlib2==2.3.7; python_version<"3.4"
 
-# File System Operations
-pathlib2>=2.3.7; python_version < "3.4"
+# Async utilities
+asyncio-mqtt==0.13.0
 
-# Date and Time Utilities (built-in)
-# datetime - built-in
+# Development and debugging
+python-dotenv==1.0.0
 
-# Development and Testing (Optional)
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-
-# Performance Monitoring
-memory-profiler>=0.61.0
-
-# Optional: Better JSON handling
-orjson>=3.9.0
+# Optional: Advanced chess analysis
+# python-chess-annotator==1.0.0  # Uncomment for advanced analysis features
+# stockfish==3.28.0  # Python wrapper (if not using direct engine) don't uncomment this
 
 # Optional: Enhanced logging
-structlog>=23.2.0
+structlog==23.2.0
 
-# Optional: Configuration management
-python-dotenv>=1.0.0
+# Optional: Configuration management  
+pyyaml==6.0.1
+toml==0.10.2
 
-# Process Management
-supervisor>=4.2.5
+# Optional: Performance monitoring
+prometheus-client==0.19.0
 
-# WebSocket Testing Tools
-websocket-client>=1.6.0
+# Optional: Testing (development only)
+# pytest==7.4.3
+# pytest-asyncio==0.21.1
+# pytest-qt==4.2.0
+playwright
+# more
+pyttsx3>=2.90
+pywin32>=306
