@@ -8,7 +8,7 @@
         "128": "img/logo-128.png"
     },
     "version": "3.0.0",
-    "description": "Advanced chess analysis tool - Server-side managed. Visit chess.com and run the server application for full functionality.",
+    "description": "Made with ♥️ by Bqrio in Germany",
     "permissions": [
         "storage",
         "declarativeNetRequest"

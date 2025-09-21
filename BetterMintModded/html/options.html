@@ -3,7 +3,7 @@
 <head>
     <title>BetterMint Modded</title>
     <meta charset="utf-8">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600&display=swap">
     <style>
         * {
             margin: 0;
@@ -12,242 +12,535 @@
         }
 
         body {
-            width: 420px;
-            height: 380px;
-            background: linear-gradient(135deg, #2c2b29 0%, #4b4847 100%);
+            width: 320px;
+            min-height: 400px;
+            background: #2c2b29;
             color: #ffffff;
             font-family: 'Montserrat', Arial, sans-serif;
-            overflow: hidden;
-            position: relative;
+            font-size: 14px;
+            line-height: 1.4;
         }
 
-        .container {
-            padding: 25px;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
+        .header {
+            background: #69923e;
+            color: #ffffff;
+            padding: 16px;
             text-align: center;
-            position: relative;
-            z-index: 2;
-        }
-
-        .background-pattern {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-image: 
-                radial-gradient(circle at 20% 20%, rgba(105, 146, 62, 0.1) 0%, transparent 50%),
-                radial-gradient(circle at 80% 80%, rgba(105, 146, 62, 0.1) 0%, transparent 50%);
-            z-index: 1;
-        }
-
-        .logo-container {
-            margin-bottom: 20px;
-            animation: fadeInUp 0.8s ease-out;
+            border-bottom: 2px solid #4e7837;
         }
 
         .logo {
-            width: 64px;
-            height: 64px;
-            background: linear-gradient(135deg, #69923e, #4e7837);
-            border-radius: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 15px;
-            box-shadow: 0 8px 25px rgba(105, 146, 62, 0.3);
-            position: relative;
+            width: 32px;
+            height: 32px;
+            margin: 0 auto 8px;
+            border-radius: 6px;
             overflow: hidden;
+            background: #4e7837;
         }
 
-        .logo::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: linear-gradient(45deg, transparent, rgba(255,255,255,0.1), transparent);
-            transform: rotate(45deg);
-            animation: shimmer 3s infinite;
-        }
-
-        .logo-text {
-            font-size: 24px;
-            font-weight: 700;
-            color: white;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-            position: relative;
-            z-index: 2;
+        .logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
 
         .title {
-            font-size: 24px;
-            font-weight: 700;
-            color: #ffffff;
-            margin-bottom: 8px;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .subtitle {
-            font-size: 14px;
-            color: #69923e;
-            font-weight: 600;
-            margin-bottom: 25px;
-            letter-spacing: 0.5px;
-        }
-
-        .message {
-            background: rgba(105, 146, 62, 0.1);
-            border: 2px solid #69923e;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-            backdrop-filter: blur(10px);
-            animation: fadeInUp 0.8s ease-out 0.2s both;
-        }
-
-        .message-title {
             font-size: 16px;
             font-weight: 600;
-            color: #69923e;
-            margin-bottom: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
+            margin-bottom: 4px;
         }
 
-        .message-text {
-            font-size: 13px;
-            line-height: 1.5;
-            color: #ffffff;
-            opacity: 0.9;
-        }
-
-        .status-indicator {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #69923e;
-            animation: pulse 2s infinite;
-            margin-right: 8px;
-        }
-
-        .server-info {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-            padding: 15px;
-            animation: fadeInUp 0.8s ease-out 0.4s both;
-        }
-
-        .server-info-title {
+        .version {
             font-size: 12px;
+            opacity: 0.9;
+            font-weight: 400;
+        }
+
+        .content {
+            padding: 16px;
+        }
+
+        .status-section {
+            margin-bottom: 20px;
+        }
+
+        .status-header {
+            font-size: 13px;
             font-weight: 600;
             color: #69923e;
             margin-bottom: 8px;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 0.5px;
         }
 
-        .server-details {
+        .status-card {
+            background: #4b4847;
+            border-left: 4px solid #e74c3c;
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .status-card.connected {
+            border-left-color: #27ae60;
+        }
+
+        .status-card.checking {
+            border-left-color: #f39c12;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #e74c3c;
+            margin-right: 8px;
+        }
+
+        .status-dot.connected {
+            background: #27ae60;
+        }
+
+        .status-dot.checking {
+            background: #f39c12;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-text {
+            font-weight: 500;
+            font-size: 13px;
+            color: #ffffff;
+        }
+
+        .status-details {
+            font-size: 12px;
+            color: #ffffff;
+            opacity: 0.7;
+            margin-top: 4px;
+        }
+
+        .server-info {
+            display: none;
+            margin-top: 8px;
+            background: #2c2b29;
+            border-radius: 3px;
+            padding: 8px;
+        }
+
+        .server-info.visible {
+            display: block;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
             font-size: 11px;
             color: #ffffff;
+            margin-bottom: 2px;
+        }
+
+        .info-label {
+            font-weight: 500;
             opacity: 0.8;
-            line-height: 1.4;
         }
 
-        .highlight {
+        .info-value {
             color: #69923e;
-            font-weight: 600;
+            font-weight: 500;
         }
 
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+        .install-section {
+            margin-bottom: 20px;
+        }
+
+        .install-card {
+            background: #4b4847;
+            border: 1px solid #3498db;
+            border-radius: 6px;
+            padding: 12px;
+        }
+
+        .install-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #3498db;
+            margin-bottom: 6px;
+        }
+
+        .install-text {
+            font-size: 12px;
+            color: #ffffff;
+            opacity: 0.9;
+            margin-bottom: 8px;
+        }
+
+        .download-link {
+            display: inline-block;
+            background: #3498db;
+            color: #ffffff;
+            text-decoration: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+
+        .download-link:hover {
+            background: #2980b9;
+        }
+
+        .help-section {
+            border-top: 1px solid #4b4847;
+            padding-top: 16px;
+        }
+
+        .help-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #69923e;
+            margin-bottom: 8px;
+        }
+
+        .help-list {
+            font-size: 11px;
+            color: #ffffff;
+            opacity: 0.9;
+            line-height: 1.5;
+            padding-left: 16px;
+        }
+
+        .help-list li {
+            margin-bottom: 4px;
+            padding-left: 4px;
+        }
+
+        .error-message {
+            background: #4b4847;
+            border: 1px solid #e74c3c;
+            border-radius: 4px;
+            padding: 8px;
+            font-size: 11px;
+            color: #e74c3c;
+            margin-top: 8px;
+        }
+
+        .retry-button {
+            background: none;
+            border: 1px solid #69923e;
+            color: #69923e;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            cursor: pointer;
+            margin-top: 6px;
+            transition: all 0.2s;
+        }
+
+        .retry-button:hover {
+            background: #69923e;
+            color: #ffffff;
         }
 
         @keyframes pulse {
             0%, 100% {
                 opacity: 1;
-                transform: scale(1);
             }
             50% {
-                opacity: 0.6;
-                transform: scale(1.2);
+                opacity: 0.5;
             }
         }
 
-        @keyframes shimmer {
-            0% {
-                transform: translateX(-100%) translateY(-100%) rotate(45deg);
-            }
-            100% {
-                transform: translateX(100%) translateY(100%) rotate(45deg);
-            }
+        .hidden {
+            display: none;
         }
 
-        .version {
-            position: absolute;
-            bottom: 10px;
-            right: 15px;
-            font-size: 10px;
-            color: rgba(255, 255, 255, 0.4);
-            font-weight: 400;
+        .highlight {
+            color: #69923e;
+            font-weight: 500;
         }
     </style>
 </head>
 
 <body>
-    <div class="background-pattern"></div>
-    
-    <div class="container">
-        <div class="logo-container">
-            <div class="logo">
-                <span class="logo-text">♛</span>
+    <div class="header">
+        <div class="logo">
+            <img src="../img/betterlogo.png" alt="BetterMint Logo" onerror="this.style.display='none'">
+        </div>
+        <div class="title">BetterMint Modded</div>
+        <div class="version">Extension v3.0.0</div>
+    </div>
+
+    <div class="content">
+        <div class="status-section">
+            <div class="status-header">Connection Status</div>
+            
+            <div class="status-card checking" id="statusCard">
+                <div class="status-indicator">
+                    <div class="status-dot checking" id="statusDot"></div>
+                    <div class="status-text" id="statusText">Checking server...</div>
+                </div>
+                <div class="status-details" id="statusDetails">Connecting to ws://localhost:8000/ws</div>
+                
+                <div class="server-info" id="serverInfo">
+                    <div class="info-row">
+                        <span class="info-label">Version:</span>
+                        <span class="info-value" id="serverVersion">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Engines:</span>
+                        <span class="info-value" id="engineCount">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Connections:</span>
+                        <span class="info-value" id="connectionCount">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">TTS:</span>
+                        <span class="info-value" id="ttsStatus">-</span>
+                    </div>
+                </div>
+                
+                <div class="error-message hidden" id="errorMessage">
+                    Failed to connect to BetterMint Modded server. Make sure the application is running.
+                    <button class="retry-button" onclick="checkServerStatus()">Retry</button>
+                </div>
             </div>
-            <div class="title">BetterMint Modded</div>
-            <div class="subtitle">Advanced Chess Analysis</div>
         </div>
 
-        <div class="message">
-            <div class="message-title">
-                <div class="status-indicator"></div>
-                Server-Side Management
-            </div>
-            <div class="message-text">
-                Please visit <span class="highlight">chess.com</span> and ensure the BetterMint Modded server application is running. All analysis controls and settings are now managed server-side for enhanced performance and reliability.
+        <div class="install-section" id="installSection">
+            <div class="install-card">
+                <div class="install-title">Installation Required</div>
+                <div class="install-text">
+                    Download and run BetterMint Modded to use this extension for chess analysis on <span class="highlight">chess.com</span>.
+                </div>
+                <a href="https://cgpe.netlify.app" target="_blank" class="download-link">
+                    Download BetterMint Modded
+                </a>
             </div>
         </div>
 
-        <div class="server-info">
-            <div class="server-info-title">Quick Setup</div>
-            <div class="server-details">
-                1. Run <span class="highlight">main.py</span> from the server directory<br>
-                2. Configure engines and settings in the GUI<br>
-                3. Visit <span class="highlight">chess.com</span> to start analyzing
-            </div>
+        <div class="help-section">
+            <div class="help-title">Quick Setup</div>
+            <ol class="help-list">
+                <li>Download BetterMint Modded from <span class="highlight">cgpe.netlify.app</span></li>
+                <li>Run the application (<span class="highlight">main.py</span> or <span class="highlight">run.bat</span>)</li>
+                <li>Configure your chess engines in the GUI</li>
+                <li>Visit <span class="highlight">chess.com</span> to start analyzing</li>
+            </ol>
         </div>
     </div>
 
-    <div class="version">v3.0.0</div>
-
     <script>
-        // Simple animation trigger
+        let isConnected = false;
+        let retryCount = 0;
+        let currentWebSocket = null;
+        let connectionTimeout = null;
+        let heartbeatInterval = null;
+        const maxRetries = 3;
+        const wsUrl = 'ws://localhost:8000/ws';
+
+        function closeCurrentConnection() {
+            if (currentWebSocket) {
+                currentWebSocket.onopen = null;
+                currentWebSocket.onclose = null;
+                currentWebSocket.onerror = null;
+                currentWebSocket.onmessage = null;
+                if (currentWebSocket.readyState === WebSocket.OPEN) {
+                    currentWebSocket.close();
+                }
+                currentWebSocket = null;
+            }
+            if (connectionTimeout) {
+                clearTimeout(connectionTimeout);
+                connectionTimeout = null;
+            }
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+            }
+        }
+
+        async function checkServerStatus() {
+            const statusCard = document.getElementById('statusCard');
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            const statusDetails = document.getElementById('statusDetails');
+            const serverInfo = document.getElementById('serverInfo');
+            const errorMessage = document.getElementById('errorMessage');
+            const installSection = document.getElementById('installSection');
+
+            // Close any existing connection
+            closeCurrentConnection();
+
+            // Reset UI to checking state
+            statusCard.className = 'status-card checking';
+            statusDot.className = 'status-dot checking';
+            statusText.textContent = 'Checking server...';
+            statusDetails.textContent = 'Connecting to ws://localhost:8000/ws';
+            serverInfo.className = 'server-info';
+            errorMessage.className = 'error-message hidden';
+
+            try {
+                currentWebSocket = new WebSocket(wsUrl);
+
+                // Set connection timeout
+                connectionTimeout = setTimeout(() => {
+                    console.log('WebSocket connection timeout');
+                    closeCurrentConnection();
+                    handleConnectionFailure('Connection timeout');
+                }, 5000);
+
+                currentWebSocket.onopen = function(event) {
+                    console.log('WebSocket connection opened');
+                    clearTimeout(connectionTimeout);
+                    connectionTimeout = null;
+
+                    // Send a status request
+                    const statusRequest = {
+                        type: 'status_request',
+                        timestamp: Date.now()
+                    };
+                    currentWebSocket.send(JSON.stringify(statusRequest));
+
+                    // Set up heartbeat to keep connection alive
+                    heartbeatInterval = setInterval(() => {
+                        if (currentWebSocket && currentWebSocket.readyState === WebSocket.OPEN) {
+                            currentWebSocket.send(JSON.stringify({
+                                type: 'ping',
+                                timestamp: Date.now()
+                            }));
+                        }
+                    }, 30000); // Send ping every 30 seconds
+                };
+
+                currentWebSocket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('Received WebSocket message:', data);
+
+                        if (data.type === 'status_response' || data.type === 'pong') {
+                            // Update UI for successful connection
+                            statusCard.className = 'status-card connected';
+                            statusDot.className = 'status-dot connected';
+                            statusText.textContent = 'Connected to BetterMint Modded';
+                            statusDetails.textContent = 'WebSocket connection active';
+                            
+                            // Show server information
+                            document.getElementById('serverVersion').textContent = data.version || '3.0.0';
+                            document.getElementById('engineCount').textContent = data.engines || '0';
+                            document.getElementById('connectionCount').textContent = data.connections || '1';
+                            document.getElementById('ttsStatus').textContent = data.tts_available ? 'Available' : 'Disabled';
+                            
+                            serverInfo.className = 'server-info visible';
+                            installSection.style.display = 'none';
+                            
+                            isConnected = true;
+                            retryCount = 0;
+                        }
+                    } catch (error) {
+                        console.log('Failed to parse WebSocket message:', error);
+                    }
+                };
+
+                currentWebSocket.onerror = function(error) {
+                    console.log('WebSocket error:', error);
+                    closeCurrentConnection();
+                    handleConnectionFailure('WebSocket error occurred');
+                };
+
+                currentWebSocket.onclose = function(event) {
+                    console.log('WebSocket connection closed:', event.code, event.reason);
+                    
+                    if (isConnected) {
+                        // Connection was previously established but now closed
+                        isConnected = false;
+                        handleConnectionFailure('Connection lost');
+                    } else if (!connectionTimeout) {
+                        // Connection failed to establish (but not due to timeout)
+                        handleConnectionFailure('Failed to connect');
+                    }
+                    
+                    closeCurrentConnection();
+                };
+
+            } catch (error) {
+                console.log('Failed to create WebSocket:', error);
+                closeCurrentConnection();
+                handleConnectionFailure('Failed to create WebSocket connection');
+            }
+        }
+
+        function handleConnectionFailure(reason) {
+            const statusCard = document.getElementById('statusCard');
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            const statusDetails = document.getElementById('statusDetails');
+            const serverInfo = document.getElementById('serverInfo');
+            const errorMessage = document.getElementById('errorMessage');
+            const installSection = document.getElementById('installSection');
+
+            // Update UI for connection failure
+            statusCard.className = 'status-card';
+            statusDot.className = 'status-dot';
+            statusText.textContent = 'Server not found';
+            statusDetails.textContent = 'BetterMint Modded is not running';
+            
+            serverInfo.className = 'server-info';
+            errorMessage.className = 'error-message';
+            installSection.style.display = 'block';
+            
+            isConnected = false;
+            retryCount++;
+
+            console.log('Connection failed:', reason);
+        }
+
+        // Auto-retry logic
+        function startAutoRetry() {
+            if (!isConnected && retryCount < maxRetries) {
+                setTimeout(function() {
+                    checkServerStatus();
+                    if (!isConnected) {
+                        startAutoRetry();
+                    }
+                }, 3000); // Wait 3 seconds between retries
+            }
+        }
+
+        // Periodic status check when connected
+        function startPeriodicCheck() {
+            setInterval(function() {
+                if (!isConnected || (currentWebSocket && currentWebSocket.readyState !== WebSocket.OPEN)) {
+                    checkServerStatus();
+                }
+            }, 15000); // Check every 15 seconds
+        }
+
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible' && !isConnected) {
+                // Page became visible and we're not connected, try to reconnect
+                setTimeout(checkServerStatus, 500);
+            }
+        });
+
+        // Initial status check
         document.addEventListener('DOMContentLoaded', function() {
-            setTimeout(() => {
-                document.body.style.transform = 'scale(1)';
-            }, 100);
+            checkServerStatus();
+            startAutoRetry();
+            startPeriodicCheck();
+        });
+
+        // Handle page unload
+        window.addEventListener('beforeunload', function() {
+            closeCurrentConnection();
         });
     </script>
 </body>
