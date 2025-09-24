@@ -138,8 +138,9 @@ echo Press Ctrl+C to stop the server when running.
 echo.
 
 :: Start the GUI application
-echo Starting BetterMint Modded GUI...
-cd EngineWS
+echo Installing Playwright...
+playwright install
+echo Starting GUI... If this gets stuck, open a ticket on GitHub.
 python main.py
 
 :: Check exit code

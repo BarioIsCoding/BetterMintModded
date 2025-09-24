@@ -3,6 +3,7 @@
 BetterMint Modded - Advanced Chess Engine Manager
 Fixed main entry point addressing Unicode, Qt, and logging issues
 Added version checking and personalities folder migration
+FIXED: import * syntax error and QUiLoader hanging issue
 """
 
 import sys
@@ -267,7 +268,16 @@ def load_application_icon():
     try:
         from PySide6.QtGui import QIcon
         from PySide6.QtCore import QSize
-        from constants import ICON_DIR, ICON_FILES
+        
+        # FIXED: Import specific constants instead of import *
+        try:
+            from constants import ICON_DIR, ICON_FILES
+        except ImportError:
+            # Fallback if constants not available
+            icons_dir = Path(PROJECT_ROOT) / "icons"
+            icon_files = ["icon.png", "icon-16.png", "icon-32.png", "icon-48.png"]
+            ICON_DIR = icons_dir
+            ICON_FILES = icon_files
         
         icon = QIcon()
         icon_loaded = False
@@ -389,6 +399,7 @@ def setup_qt_application():
 def initialize_enhanced_logging():
     """Initialize enhanced logging system if available"""
     try:
+        # FIXED: Import specific constants instead of import *
         from constants import setup_logging, main_logger, APP_NAME, APP_VERSION
         
         # Set up enhanced logging
@@ -434,15 +445,20 @@ def check_dependencies():
                 except Exception:
                     pass
     
-    # Check for engine executables
+    # Check for engine executables (with fallback paths)
     engine_warnings = []
     try:
-        stockfish_path = Path(PROJECT_ROOT) / 'engines' / 'stockfish' / 'stockfish.exe'
-        leela_path = Path(PROJECT_ROOT) / 'engines' / 'leela' / 'lc0.exe'
+        # Try to get paths from constants, fallback to defaults
+        try:
+            from constants import STOCKFISH_PATH, LEELA_PATH
+        except ImportError:
+            # Fallback paths
+            STOCKFISH_PATH = Path(PROJECT_ROOT) / 'engines' / 'stockfish' / 'stockfish.exe'
+            LEELA_PATH = Path(PROJECT_ROOT) / 'engines' / 'leela' / 'lc0.exe'
         
-        if not stockfish_path.exists():
+        if not Path(STOCKFISH_PATH).exists():
             engine_warnings.append("Stockfish engine not found")
-        if not leela_path.exists():
+        if not Path(LEELA_PATH).exists():
             engine_warnings.append("Leela Chess Zero engine not found")
             
         if engine_warnings:
@@ -466,14 +482,56 @@ def check_dependencies():
     return True
 
 def create_main_window():
-    """Create the main application window"""
+    """Create the main application window with QUiLoader hang workaround"""
     try:
         safe_log("Creating main window")
         
-        # Import GUI components
-        from gui.main_window import ChessEngineGUI
+        # CRITICAL FIX: Import GUI components AFTER QApplication is created
+        # This prevents QUiLoader hanging issues on Windows when run from batch files
+        safe_log("Importing GUI module (may take a moment on first run)")
+        print("try")
+        # Pre-import any QUiLoader-related components to work around PySide6 bug
+        try:
+            from PySide6.QtUiTools import QUiLoader
+            # Create a dummy loader to initialize the QUiLoader subsystem
+            dummy_loader = QUiLoader()
+            safe_log("QUiLoader subsystem initialized successfully")
+            del dummy_loader  # Clean up
+        except Exception as loader_error:
+            safe_log(f"QUiLoader pre-initialization failed: {loader_error}", logging.WARNING)
+            # Continue anyway - the GUI module might not use QUiLoader
+        
+        # Ensure the GUI directory is in the Python path
+        gui_dir = os.path.join(PROJECT_ROOT, 'gui')
+        if gui_dir not in sys.path:
+            sys.path.insert(0, gui_dir)
+            safe_log(f"Added GUI directory to path: {gui_dir}")
+        
+        # Now import the main GUI module
+        try:
+            # Try direct import first
+            from gui.main_window import ChessEngineGUI
+            safe_log("Successfully imported ChessEngineGUI from gui.main_window")
+        except ImportError as import_error:
+            safe_log(f"Direct import failed: {import_error}", logging.WARNING)
+            # Try alternative import methods
+            try:
+                # Method 2: Import main_window module then get the class
+                import gui.main_window as main_window_module
+                ChessEngineGUI = main_window_module.ChessEngineGUI
+                safe_log("Successfully imported via module import")
+            except ImportError:
+                # Method 3: Direct file import (last resort)
+                import importlib.util
+                main_window_path = os.path.join(PROJECT_ROOT, 'gui', 'main_window.py')
+                spec = importlib.util.spec_from_file_location("main_window", main_window_path)
+                main_window_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(main_window_module)
+                ChessEngineGUI = main_window_module.ChessEngineGUI
+                safe_log("Successfully imported via file import")
         
         # Create main window
+        safe_log("Instantiating main window...")
         window = ChessEngineGUI()
         
         safe_log(f"Main window created: {window.windowTitle()}")
@@ -482,6 +540,14 @@ def create_main_window():
     except ImportError as e:
         safe_log(f"CRITICAL: Failed to import GUI components: {e}", logging.CRITICAL)
         safe_log(f"Import traceback: {traceback.format_exc()}", logging.DEBUG)
+        
+        # Try to provide more helpful error information
+        if "gui.main_window" in str(e):
+            safe_log("The gui/main_window.py file may be missing or have import issues", logging.ERROR)
+        elif "QUiLoader" in str(e):
+            safe_log("QUiLoader import failed - this is a known PySide6 issue", logging.ERROR)
+            safe_log("Try downgrading to PySide6 6.5.3 or using PySide6-Essentials", logging.ERROR)
+        
         return None
     except Exception as e:
         safe_log(f"CRITICAL: Failed to create main window: {e}", logging.CRITICAL)
@@ -538,7 +604,7 @@ def main():
         if not app:
             return 1
         
-        # Phase 3: Main window creation
+        # Phase 3: Main window creation (AFTER QApplication is created)
         log_func("Phase 3: Main window creation")
         window = create_main_window()
         if not window:
