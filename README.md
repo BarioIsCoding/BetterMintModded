@@ -2,7 +2,12 @@
 **A modification of BotSolver's BetterMint** 💚
 
 ~~Releases as BETA on **Sunday**. Stay tuned!~~ Released!
-⚠️ EMERGENCY FIX! IF YOU INSTALLED IT ON 21/09/2025 BEFORE 19:00 UTC, PLEASE REINSTALL.
+
+New update 24/09/2025: Windows bugfixes
+`MINT Beta 2b 24092025 Bugfixes`
+What's new?
+* Improved startup stability
+* Fixed jinja2 bug (Hotfix)
 
 ![BetterMint Modded Logo](https://github.com/BarioIsCoding/BetterMintModded/blob/main/EngineWS/icons/icon-256.png?raw=true)
 
