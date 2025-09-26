@@ -3,11 +3,16 @@
 
 ~~Releases as BETA on **Sunday**. Stay tuned!~~ Released!
 
-New update 24/09/2025: Windows bugfixes
-`MINT Beta 2b 24092025 Bugfixes`
+New update 26/09/2025: Improvements
+`MINT Beta 2c 26092025 Features`
 What's new?
 * Improved startup stability
-* Fixed jinja2 bug (Hotfix)
+* Quality of life
+* **Custom engines**
+* Extension fix (Please uodate the extension)
+* Engine store
+* Removed Playwright Chromium browser
+* Extension installation instructions
 
 ![BetterMint Modded Logo](https://github.com/BarioIsCoding/BetterMintModded/blob/main/EngineWS/icons/icon-256.png?raw=true)
 
