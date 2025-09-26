@@ -11,7 +11,7 @@ What's new?
 * Improved startup stability
 * Quality of life
 * **Custom engines**
-* Extension fix (Please uodate the extension)
+* Extension fix
 * Engine store
 * Removed Playwright Chromium browser
 * Extension installation instructions
