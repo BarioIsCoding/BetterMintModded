@@ -157,3 +157,90 @@ function createServerStatusIndicator() {
 
 function updateServerStatus(status) {
   if (!serverStatusIndicator) createServerStatusIndicator();
+  
+  switch (status) {
+    case 'connected':
+      serverStatusIndicator.className = 'bettermint-server-status bettermint-connected';
+      serverStatusIndicator.textContent = 'BetterMint Server Connected';
+      break;
+    case 'connecting':
+      serverStatusIndicator.className = 'bettermint-server-status bettermint-connecting';
+      serverStatusIndicator.textContent = 'Connecting to BetterMint Server...';
+      break;
+    case 'disconnected':
+      serverStatusIndicator.className = 'bettermint-server-status bettermint-disconnected';
+      serverStatusIndicator.textContent = 'BetterMint Server Disconnected';
+      break;
+  }
+  
+  // Auto-hide after 3 seconds if connected
+  if (status === 'connected') {
+    setTimeout(() => {
+      if (serverStatusIndicator && serverStatusIndicator.className.includes('bettermint-connected')) {
+        serverStatusIndicator.style.opacity = '0';
+        setTimeout(() => {
+          if (serverStatusIndicator) {
+            serverStatusIndicator.remove();
+            serverStatusIndicator = null;
+          }
+        }, 300);
+      }
+    }, 3000);
+  }
+}
+
+// Monitor server connection
+function monitorServerConnection() {
+  const serverUrl = DefaultExtensionOptions["server-url"];
+  
+  fetch(`${serverUrl}/health`)
+    .then(response => response.json())
+    .then(data => {
+      if (data.status === 'healthy') {
+        updateServerStatus('connected');
+      } else {
+        updateServerStatus('connecting');
+      }
+    })
+    .catch(error => {
+      updateServerStatus('disconnected');
+    });
+}
+
+// Listen for URL changes from popup
+chrome.storage.onChanged.addListener(function(changes, namespace) {
+  if (namespace === 'local') {
+    if (changes.serverUrl) {
+      DefaultExtensionOptions["server-url"] = changes.serverUrl.newValue;
+      console.log('Server URL updated to:', changes.serverUrl.newValue);
+    }
+    if (changes.wsUrl) {
+      DefaultExtensionOptions["url-api-stockfish"] = changes.wsUrl.newValue;
+      console.log('WebSocket URL updated to:', changes.wsUrl.newValue);
+    }
+    // Re-check connection with new URLs
+    monitorServerConnection();
+  }
+});
+
+// Initialize with stored URLs, then inject script
+loadStoredUrls(function() {
+  console.log('BetterMint Modded: Loaded URLs', {
+    serverUrl: DefaultExtensionOptions["server-url"],
+    wsUrl: DefaultExtensionOptions["url-api-stockfish"]
+  });
+  
+  // Inject the main Mint.js script
+  injectScript("js/Mint.js");
+  
+  // Initialize monitoring when page loads
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+      setTimeout(monitorServerConnection, 1000);
+      setInterval(monitorServerConnection, 15000);
+    });
+  } else {
+    setTimeout(monitorServerConnection, 1000);
+    setInterval(monitorServerConnection, 15000);
+  }
+});
