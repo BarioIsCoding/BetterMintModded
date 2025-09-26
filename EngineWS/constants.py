@@ -8,8 +8,6 @@ import logging
 import logging.handlers
 from pathlib import Path
 
-
-# Chess.com inspired color scheme 
 COLORS = {
     'white': '#ffffff',
     'light_green': '#69923e',
@@ -25,8 +23,8 @@ COLORS = {
 
 # Application metadata
 APP_NAME = "BetterMint Modded"
-APP_VERSION = "3.0.0"
-APP_ORGANIZATION = "BetterMint Team"
+APP_VERSION = "MINT Beta 2b 24092025 Bugfixes"
+APP_ORGANIZATION = "BetterMint Team" # We are not actually affiliated with BetterMint. This is just used to show the original team in the code.
 
 # Server configuration
 DEFAULT_PORT = 8000
