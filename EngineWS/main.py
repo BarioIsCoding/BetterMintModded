@@ -78,11 +78,11 @@ def get_current_version() -> str:
             with open(version_file, 'r', encoding='utf-8') as f:
                 return f.read().strip()
         else:
-            safe_log("Version file not found, assuming version 3.0.0", logging.WARNING)
-            return "3.0.0"
+            safe_log("Version file not found, assuming version MINT Beta 2c 26092025 Features", logging.WARNING)
+            return "MINT Beta 2c 26092025 Features"
     except Exception as e:
         safe_log(f"Error reading version file: {e}", logging.WARNING)
-        return "3.0.0"
+        return "MINT Beta 2c 26092025 Features"
 
 
 def get_latest_version() -> str:
@@ -92,7 +92,7 @@ def get_latest_version() -> str:
         
         # Create request with user agent to avoid potential blocking
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'BetterMintModded/3.0.0')
+        req.add_header('User-Agent', 'BetterMintModded/MINT Beta 2c 26092025 Features')
         
         with urllib.request.urlopen(req, timeout=10) as response:
             if response.status == 200:
@@ -341,7 +341,7 @@ def setup_windows_taskbar_icon():
         try:
             import ctypes
             # Set unique App User Model ID for Windows taskbar grouping
-            app_id = 'BetterMintTeam.BetterMintModded.ChessEngine.3.0.0'
+            app_id = 'BetterMintTeam.BetterMintModded.ChessEngine.MINT Beta 2c 26092025 Features'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
             safe_log("Windows App User Model ID set for taskbar icon")
             return True
@@ -377,7 +377,7 @@ def setup_qt_application():
         
         # Set application metadata
         app.setApplicationName("BetterMint Modded")
-        app.setApplicationVersion("3.0.0")
+        app.setApplicationVersion("MINT Beta 2c 26092025 Features")
         app.setOrganizationName("BetterMint Team")
         set_application_icon(app)
         
@@ -562,7 +562,7 @@ def main():
     log_func = logger.info if logger else safe_log
     
     log_func("=" * 60)
-    log_func("STARTING BetterMint Modded v3.0.0")
+    log_func("STARTING BetterMint Modded vMINT Beta 2c 26092025 Features")
     log_func("=" * 60)
     
     exit_code = 1  # Default to error

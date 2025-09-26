@@ -468,7 +468,7 @@ setoption name BookFilter value 20"""
         try:
             export_data = {
                 "settings": self.settings,
-                "version": "3.0.0",
+                "version": "MINT Beta 2c 26092025 Features",
                 "export_date": datetime.now().isoformat()
             }
             with open(filepath, 'w') as f:
