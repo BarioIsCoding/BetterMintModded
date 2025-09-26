@@ -6,6 +6,7 @@
 New update 26/09/2025: Improvements
 
 `MINT Beta 2c 26092025 Features`
+
 What's new?
 * Improved startup stability
 * Quality of life
