@@ -1,6 +1,6 @@
 {
     "manifest_version": 3,
-    "name": "BetterMint Modded - Chess Analysis",
+    "name": "BetterMint Modded",
     "short_name": "BetterMint Modded",
     "icons": {
         "16": "img/logo-16.png",
