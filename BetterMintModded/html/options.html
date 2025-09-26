@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>BetterMint Modded</title>
     <meta charset="utf-8">
@@ -14,11 +15,30 @@
         body {
             width: 320px;
             min-height: 400px;
+            max-height: 600px;
+            overflow-y: auto;
             background: #2c2b29;
             color: #ffffff;
             font-family: 'Montserrat', Arial, sans-serif;
             font-size: 14px;
             line-height: 1.4;
+        }
+
+        body::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        body::-webkit-scrollbar-track {
+            background: #2c2b29;
+        }
+
+        body::-webkit-scrollbar-thumb {
+            background: #69923e;
+            border-radius: 4px;
+        }
+
+        body::-webkit-scrollbar-thumb:hover {
+            background: #7db34f;
         }
 
         .header {
@@ -248,10 +268,146 @@
             color: #ffffff;
         }
 
+        .settings-section {
+            margin-bottom: 16px;
+        }
+
+        .settings-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px;
+            background: #4b4847;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .settings-toggle:hover {
+            background: #5a5554;
+        }
+
+        .settings-toggle-text {
+            font-size: 11px;
+            color: #69923e;
+            font-weight: 500;
+        }
+
+        .settings-panel {
+            display: none;
+            margin-top: 8px;
+            background: #4b4847;
+            border-radius: 4px;
+            padding: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .settings-panel::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .settings-panel::-webkit-scrollbar-track {
+            background: #2c2b29;
+            border-radius: 3px;
+        }
+
+        .settings-panel::-webkit-scrollbar-thumb {
+            background: #69923e;
+            border-radius: 3px;
+        }
+
+        .settings-panel::-webkit-scrollbar-thumb:hover {
+            background: #7db34f;
+        }
+
+        .settings-panel.visible {
+            display: block;
+        }
+
+        .settings-input-group {
+            margin-bottom: 12px;
+        }
+
+        .settings-label {
+            font-size: 11px;
+            color: #ffffff;
+            opacity: 0.8;
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        .settings-input {
+            width: 100%;
+            padding: 6px 8px;
+            background: #2c2b29;
+            border: 1px solid #69923e;
+            border-radius: 3px;
+            color: #ffffff;
+            font-size: 11px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .settings-input:focus {
+            outline: none;
+            border-color: #7db34f;
+        }
+
+        .settings-save {
+            background: #69923e;
+            color: #ffffff;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 3px;
+            font-size: 11px;
+            cursor: pointer;
+            width: 100%;
+            transition: background 0.2s;
+        }
+
+        .settings-save:hover {
+            background: #7db34f;
+        }
+
+        .settings-reset {
+            background: none;
+            border: 1px solid #e74c3c;
+            color: #e74c3c;
+            padding: 6px 12px;
+            border-radius: 3px;
+            font-size: 11px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 6px;
+            transition: all 0.2s;
+        }
+
+        .settings-reset:hover {
+            background: #e74c3c;
+            color: #ffffff;
+        }
+
+        .success-badge {
+            display: none;
+            background: #27ae60;
+            color: #ffffff;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            margin-top: 8px;
+        }
+
+        .success-badge.visible {
+            display: block;
+        }
+
         @keyframes pulse {
-            0%, 100% {
+
+            0%,
+            100% {
                 opacity: 1;
             }
+
             50% {
                 opacity: 0.5;
             }
@@ -264,6 +420,15 @@
         .highlight {
             color: #69923e;
             font-weight: 500;
+        }
+
+        .chevron {
+            transition: transform 0.3s;
+            font-size: 10px;
+        }
+
+        .chevron.rotated {
+            transform: rotate(180deg);
         }
     </style>
 </head>
@@ -280,14 +445,14 @@
     <div class="content">
         <div class="status-section">
             <div class="status-header">Connection Status</div>
-            
+
             <div class="status-card checking" id="statusCard">
                 <div class="status-indicator">
                     <div class="status-dot checking" id="statusDot"></div>
                     <div class="status-text" id="statusText">Checking server...</div>
                 </div>
-                <div class="status-details" id="statusDetails">Connecting to ws://localhost:8000/ws</div>
-                
+                <div class="status-details" id="statusDetails">Connecting to http://localhost:8000</div>
+
                 <div class="server-info" id="serverInfo">
                     <div class="info-row">
                         <span class="info-label">Version:</span>
@@ -298,19 +463,35 @@
                         <span class="info-value" id="engineCount">-</span>
                     </div>
                     <div class="info-row">
-                        <span class="info-label">Connections:</span>
-                        <span class="info-value" id="connectionCount">-</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">TTS:</span>
-                        <span class="info-value" id="ttsStatus">-</span>
+                        <span class="info-label">Uptime:</span>
+                        <span class="info-value" id="uptime">-</span>
                     </div>
                 </div>
-                
+
                 <div class="error-message hidden" id="errorMessage">
                     Failed to connect to BetterMint Modded server. Make sure the application is running.
-                    <button class="retry-button" onclick="checkServerStatus()">Retry</button>
+                    <button class="retry-button" id="retryButton">Retry</button>
                 </div>
+            </div>
+        </div>
+
+        <div class="settings-section" id="settingsSection">
+            <div class="settings-toggle" id="settingsToggle">
+                <span class="settings-toggle-text">Advanced Settings</span>
+                <span class="chevron" id="settingsChevron">▼</span>
+            </div>
+            <div class="settings-panel" id="settingsPanel">
+                <div class="settings-input-group">
+                    <label class="settings-label">Server URL:</label>
+                    <input type="text" class="settings-input" id="serverUrlInput" placeholder="http://localhost:8000">
+                </div>
+                <div class="settings-input-group">
+                    <label class="settings-label">WebSocket URL:</label>
+                    <input type="text" class="settings-input" id="wsUrlInput" placeholder="ws://localhost:8000/ws">
+                </div>
+                <button class="settings-save" id="saveButton">Save & Reconnect</button>
+                <button class="settings-reset" id="resetButton">Reset to Defaults</button>
+                <div class="success-badge" id="successBadge">Settings saved successfully!</div>
             </div>
         </div>
 
@@ -318,7 +499,8 @@
             <div class="install-card">
                 <div class="install-title">Installation Required</div>
                 <div class="install-text">
-                    Download and run BetterMint Modded to use this extension for chess analysis on <span class="highlight">chess.com</span>.
+                    Download and run BetterMint Modded to use this extension for chess analysis on <span
+                        class="highlight">chess.com</span>.
                 </div>
                 <a href="https://cgpe.netlify.app" target="_blank" class="download-link">
                     Download BetterMint Modded
@@ -330,218 +512,20 @@
             <div class="help-title">Quick Setup</div>
             <ol class="help-list">
                 <li>Download BetterMint Modded from <span class="highlight">cgpe.netlify.app</span></li>
-                <li>Run the application (<span class="highlight">main.py</span> or <span class="highlight">run.bat</span>)</li>
+                <li>Run the application (<span class="highlight">main.py</span> or <span
+                        class="highlight">run.bat</span>)</li>
                 <li>Configure your chess engines in the GUI</li>
                 <li>Visit <span class="highlight">chess.com</span> to start analyzing</li>
             </ol>
+            <div
+                style="margin-top: 12px; padding: 8px; background: #4b4847; border-radius: 4px; font-size: 10px; color: #ffffff; opacity: 0.7;">
+                <strong>Troubleshooting:</strong> If connection fails, check that the server is running and try clicking
+                "Retry". For custom server locations, use Advanced Settings.
+            </div>
         </div>
     </div>
 
-    <script>
-        let isConnected = false;
-        let retryCount = 0;
-        let currentWebSocket = null;
-        let connectionTimeout = null;
-        let heartbeatInterval = null;
-        const maxRetries = 3;
-        const wsUrl = 'ws://localhost:8000/ws';
-
-        function closeCurrentConnection() {
-            if (currentWebSocket) {
-                currentWebSocket.onopen = null;
-                currentWebSocket.onclose = null;
-                currentWebSocket.onerror = null;
-                currentWebSocket.onmessage = null;
-                if (currentWebSocket.readyState === WebSocket.OPEN) {
-                    currentWebSocket.close();
-                }
-                currentWebSocket = null;
-            }
-            if (connectionTimeout) {
-                clearTimeout(connectionTimeout);
-                connectionTimeout = null;
-            }
-            if (heartbeatInterval) {
-                clearInterval(heartbeatInterval);
-                heartbeatInterval = null;
-            }
-        }
-
-        async function checkServerStatus() {
-            const statusCard = document.getElementById('statusCard');
-            const statusDot = document.getElementById('statusDot');
-            const statusText = document.getElementById('statusText');
-            const statusDetails = document.getElementById('statusDetails');
-            const serverInfo = document.getElementById('serverInfo');
-            const errorMessage = document.getElementById('errorMessage');
-            const installSection = document.getElementById('installSection');
-
-            // Close any existing connection
-            closeCurrentConnection();
-
-            // Reset UI to checking state
-            statusCard.className = 'status-card checking';
-            statusDot.className = 'status-dot checking';
-            statusText.textContent = 'Checking server...';
-            statusDetails.textContent = 'Connecting to ws://localhost:8000/ws';
-            serverInfo.className = 'server-info';
-            errorMessage.className = 'error-message hidden';
-
-            try {
-                currentWebSocket = new WebSocket(wsUrl);
-
-                // Set connection timeout
-                connectionTimeout = setTimeout(() => {
-                    console.log('WebSocket connection timeout');
-                    closeCurrentConnection();
-                    handleConnectionFailure('Connection timeout');
-                }, 5000);
-
-                currentWebSocket.onopen = function(event) {
-                    console.log('WebSocket connection opened');
-                    clearTimeout(connectionTimeout);
-                    connectionTimeout = null;
-
-                    // Send a status request
-                    const statusRequest = {
-                        type: 'status_request',
-                        timestamp: Date.now()
-                    };
-                    currentWebSocket.send(JSON.stringify(statusRequest));
-
-                    // Set up heartbeat to keep connection alive
-                    heartbeatInterval = setInterval(() => {
-                        if (currentWebSocket && currentWebSocket.readyState === WebSocket.OPEN) {
-                            currentWebSocket.send(JSON.stringify({
-                                type: 'ping',
-                                timestamp: Date.now()
-                            }));
-                        }
-                    }, 30000); // Send ping every 30 seconds
-                };
-
-                currentWebSocket.onmessage = function(event) {
-                    try {
-                        const data = JSON.parse(event.data);
-                        console.log('Received WebSocket message:', data);
-
-                        if (data.type === 'status_response' || data.type === 'pong') {
-                            // Update UI for successful connection
-                            statusCard.className = 'status-card connected';
-                            statusDot.className = 'status-dot connected';
-                            statusText.textContent = 'Connected to BetterMint Modded';
-                            statusDetails.textContent = 'WebSocket connection active';
-                            
-                            // Show server information
-                            document.getElementById('serverVersion').textContent = data.version || '3.0.0';
-                            document.getElementById('engineCount').textContent = data.engines || '0';
-                            document.getElementById('connectionCount').textContent = data.connections || '1';
-                            document.getElementById('ttsStatus').textContent = data.tts_available ? 'Available' : 'Disabled';
-                            
-                            serverInfo.className = 'server-info visible';
-                            installSection.style.display = 'none';
-                            
-                            isConnected = true;
-                            retryCount = 0;
-                        }
-                    } catch (error) {
-                        console.log('Failed to parse WebSocket message:', error);
-                    }
-                };
-
-                currentWebSocket.onerror = function(error) {
-                    console.log('WebSocket error:', error);
-                    closeCurrentConnection();
-                    handleConnectionFailure('WebSocket error occurred');
-                };
-
-                currentWebSocket.onclose = function(event) {
-                    console.log('WebSocket connection closed:', event.code, event.reason);
-                    
-                    if (isConnected) {
-                        // Connection was previously established but now closed
-                        isConnected = false;
-                        handleConnectionFailure('Connection lost');
-                    } else if (!connectionTimeout) {
-                        // Connection failed to establish (but not due to timeout)
-                        handleConnectionFailure('Failed to connect');
-                    }
-                    
-                    closeCurrentConnection();
-                };
-
-            } catch (error) {
-                console.log('Failed to create WebSocket:', error);
-                closeCurrentConnection();
-                handleConnectionFailure('Failed to create WebSocket connection');
-            }
-        }
-
-        function handleConnectionFailure(reason) {
-            const statusCard = document.getElementById('statusCard');
-            const statusDot = document.getElementById('statusDot');
-            const statusText = document.getElementById('statusText');
-            const statusDetails = document.getElementById('statusDetails');
-            const serverInfo = document.getElementById('serverInfo');
-            const errorMessage = document.getElementById('errorMessage');
-            const installSection = document.getElementById('installSection');
-
-            // Update UI for connection failure
-            statusCard.className = 'status-card';
-            statusDot.className = 'status-dot';
-            statusText.textContent = 'Server not found';
-            statusDetails.textContent = 'BetterMint Modded is not running';
-            
-            serverInfo.className = 'server-info';
-            errorMessage.className = 'error-message';
-            installSection.style.display = 'block';
-            
-            isConnected = false;
-            retryCount++;
-
-            console.log('Connection failed:', reason);
-        }
-
-        // Auto-retry logic
-        function startAutoRetry() {
-            if (!isConnected && retryCount < maxRetries) {
-                setTimeout(function() {
-                    checkServerStatus();
-                    if (!isConnected) {
-                        startAutoRetry();
-                    }
-                }, 3000); // Wait 3 seconds between retries
-            }
-        }
-
-        // Periodic status check when connected
-        function startPeriodicCheck() {
-            setInterval(function() {
-                if (!isConnected || (currentWebSocket && currentWebSocket.readyState !== WebSocket.OPEN)) {
-                    checkServerStatus();
-                }
-            }, 15000); // Check every 15 seconds
-        }
-
-        // Handle page visibility changes
-        document.addEventListener('visibilitychange', function() {
-            if (document.visibilityState === 'visible' && !isConnected) {
-                // Page became visible and we're not connected, try to reconnect
-                setTimeout(checkServerStatus, 500);
-            }
-        });
-
-        // Initial status check
-        document.addEventListener('DOMContentLoaded', function() {
-            checkServerStatus();
-            startAutoRetry();
-            startPeriodicCheck();
-        });
-
-        // Handle page unload
-        window.addEventListener('beforeunload', function() {
-            closeCurrentConnection();
-        });
-    </script>
+    <script src="../js/options.js"></script>
 </body>
+
 </html>

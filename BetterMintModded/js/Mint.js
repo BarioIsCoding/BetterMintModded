@@ -1,6 +1,6 @@
 "use strict";
 
-// BetterMint Modded v3.0.0 - PURE SERVER-CONTROLLED CLIENT
+// BetterMint Modded (MINT Beta 2c 26092025 Features) - PURE SERVER-CONTROLLED CLIENT
 // Extension acts as presentation layer only - all decisions made server-side
 
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
@@ -16,8 +16,26 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 // Server communication - reports game state and receives commands
 var ServerRequest = (function () {
     var requestId = 0;
-    var serverUrl = 'http://localhost:8000';
-    
+    var serverUrl = 'http://localhost:8000'; // Default
+
+    // Load custom server URL from extension storage if available
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+        chrome.storage.local.get(['serverUrl'], function (result) {
+            if (result.serverUrl) {
+                serverUrl = result.serverUrl.replace(/\/$/, ''); // Remove trailing slash
+                console.log('BetterMint: Using stored server URL:', serverUrl);
+            }
+        });
+
+        // Listen for URL changes
+        chrome.storage.onChanged.addListener(function (changes, namespace) {
+            if (namespace === 'local' && changes.serverUrl) {
+                serverUrl = changes.serverUrl.newValue.replace(/\/$/, '');
+                console.log('BetterMint: Server URL updated to:', serverUrl);
+            }
+        });
+    }
+
     function makeRequest(endpoint, options = {}) {
         return fetch(`${serverUrl}${endpoint}`, {
             ...options,
@@ -26,16 +44,16 @@ var ServerRequest = (function () {
                 ...options.headers
             }
         })
-        .then(response => {
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            return response.json();
-        })
-        .catch(error => {
-            console.warn(`BetterMint: Server request failed for ${endpoint}:`, error);
-            throw error;
-        });
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            })
+            .catch(error => {
+                console.warn(`BetterMint: Server request failed for ${endpoint}:`, error);
+                throw error;
+            });
     }
-    
+
     function getData(data = null) {
         var id = requestId++;
         return new Promise(function (resolve, reject) {
@@ -57,7 +75,7 @@ var ServerRequest = (function () {
                 });
         });
     }
-    
+
     function updateSettings(settings) {
         return makeRequest('/api/settings', {
             method: 'POST',
@@ -66,7 +84,7 @@ var ServerRequest = (function () {
             console.warn('BetterMint: Failed to save settings to server:', error);
         });
     }
-    
+
     function reportGameState(gameData) {
         return makeRequest('/api/game_state', {
             method: 'POST',
@@ -75,7 +93,7 @@ var ServerRequest = (function () {
             console.warn('BetterMint: Failed to report game state:', error);
         });
     }
-    
+
     function reportMove(moveData) {
         return makeRequest('/api/move_made', {
             method: 'POST',
@@ -84,7 +102,7 @@ var ServerRequest = (function () {
             console.warn('BetterMint: Failed to report move:', error);
         });
     }
-    
+
     return { getData, updateSettings, makeRequest, reportGameState, reportMove };
 })();
 
@@ -131,7 +149,7 @@ function logMessage(message, type = 'info') {
 // Settings enumeration - preserved for visual features
 var enumOptions = {
     UrlApiStockfish: "url-api-stockfish",
-    ApiStockfish: "api-stockfish", 
+    ApiStockfish: "api-stockfish",
     ShowHints: "show-hints",
     MoveAnalysis: "move-analysis",
     DepthBar: "depth-bar",
@@ -183,14 +201,14 @@ class GameController {
             movesPlayed: 0,
             gameStartTime: Date.now()
         };
-        
+
         let self = this;
-        
+
         this.controller.on("Move", (event) => {
             console.log("Move detected:", event.data);
             this.gameStats.movesPlayed++;
             this.reportPositionToServer();
-            
+
             // Report the move to server
             ServerRequest.reportMove({
                 move: event.data,
@@ -199,12 +217,12 @@ class GameController {
                 playerTurn: this.controller.getTurn()
             });
         });
-        
+
         // Create visual elements if enabled
         if (this.evalBar == null && getValueConfig(enumOptions.EvaluationBar)) {
             this.CreateAnalysisTools();
         }
-        
+
         this.controller.on('ModeChanged', (event) => {
             if (event.data === "playing") {
                 this.ResetGame();
@@ -216,14 +234,14 @@ class GameController {
                 logMessage("New game started - server notified", 'success');
             }
         });
-        
+
         let checkEventOne = false;
         this.controller.on("RendererSet", (event) => {
             this.ResetGame();
             this.RefreshEvalutionBar();
             checkEventOne = true;
         });
-        
+
         setTimeout(() => {
             if (!checkEventOne) {
                 this.controller.on("ResetGame", (event) => {
@@ -232,7 +250,7 @@ class GameController {
                 });
             }
         }, 1100);
-        
+
         this.controller.on("UpdateOptions", (event) => {
             this.options = this.controller.getOptions();
             if (event.data.flipped != undefined && this.evalBar != null) {
@@ -242,7 +260,7 @@ class GameController {
             }
         });
     }
-    
+
     UpdateExtensionOptions() {
         if (getValueConfig(enumOptions.EvaluationBar) && this.evalBar == null)
             this.CreateAnalysisTools();
@@ -250,18 +268,18 @@ class GameController {
             this.evalBar.remove();
             this.evalBar = null;
         }
-        
+
         if (getValueConfig(enumOptions.DepthBar) && this.depthBar == null)
             this.CreateAnalysisTools();
         else if (!getValueConfig(enumOptions.DepthBar) && this.depthBar != null) {
             this.depthBar.parentElement.remove();
             this.depthBar = null;
         }
-        
+
         if (!getValueConfig(enumOptions.ShowHints)) {
             this.RemoveCurrentMarkings();
         }
-        
+
         if (!getValueConfig(enumOptions.MoveAnalysis)) {
             let lastMove = this.controller.getLastMove();
             if (lastMove) {
@@ -269,7 +287,7 @@ class GameController {
             }
         }
     }
-    
+
     CreateAnalysisTools() {
         let interval1 = setInterval(() => {
             let layoutChessboard = this.chessboard.parentElement;
@@ -286,7 +304,7 @@ class GameController {
                 layoutMain.insertBefore(depthBar, layoutChessboard.nextSibling);
                 this.depthBar = depthBar.querySelector(".depthBarProgress");
             }
-            
+
             if (getValueConfig(enumOptions.EvaluationBar) && this.evalBar == null) {
                 let evalBar = document.createElement("div");
                 evalBar.style.flex = "1 1 auto;";
@@ -312,13 +330,13 @@ class GameController {
                 this.evalBarFill = layoutEvaluation.querySelector(".evaluation-bar-white");
                 this.evalScore = layoutEvaluation.querySelector(".evaluation-bar-score");
                 this.evalScoreAbbreviated = layoutEvaluation.querySelector(".evaluation-bar-scoreAbbreviated");
-                
+
                 if (!this.options.isWhiteOnBottom && this.options.flipped)
                     this.evalBar.classList.add("evaluation-bar-flipped");
             }
         }, 10);
     }
-    
+
     RefreshEvalutionBar() {
         if (getValueConfig(enumOptions.EvaluationBar)) {
             if (this.evalBar == null) {
@@ -330,10 +348,10 @@ class GameController {
             }
         }
     }
-    
+
     reportPositionToServer() {
         let FENs = this.controller.getFEN();
-        
+
         ServerRequest.reportGameState({
             fen: FENs,
             turn: this.controller.getTurn(),
@@ -342,16 +360,16 @@ class GameController {
             isPlayerWhite: !this.options.isPlayerBlack,
             timestamp: Date.now()
         });
-        
+
         console.log("Position reported to server:", FENs);
     }
-    
+
     ResetGame() {
         this.reportPositionToServer();
         this.gameStats = { movesPlayed: 0, gameStartTime: Date.now() };
         BetterMintmaster.game.RefreshEvalutionBar();
         this.RemoveCurrentMarkings();
-        
+
         ServerRequest.reportGameState({
             fen: this.controller.getFEN(),
             turn: 1,
@@ -361,7 +379,7 @@ class GameController {
             timestamp: Date.now()
         });
     }
-    
+
     RemoveCurrentMarkings() {
         this.currentMarkings.forEach((marking) => {
             let key = marking.type + "|";
@@ -371,71 +389,71 @@ class GameController {
         });
         this.currentMarkings = [];
     }
-    
+
     // Server-commanded visual feedback - displays arrows and highlights
     displayServerVisuals(visualData) {
         console.log("Displaying server visuals:", visualData);
-        
+
         if (getValueConfig(enumOptions.ShowHints)) {
             this.RemoveCurrentMarkings();
-            
+
             // Display arrows from server
             if (visualData.arrows) {
                 visualData.arrows.forEach((arrow) => {
                     console.log(`Adding server arrow: ${arrow.from} -> ${arrow.to} (${arrow.color})`);
                     this.currentMarkings.push({
-                        data: { 
-                            from: arrow.from, 
+                        data: {
+                            from: arrow.from,
                             to: arrow.to,
                             color: arrow.color || this.options.arrowColors.alt,
-                            opacity: arrow.opacity || 0.8 
+                            opacity: arrow.opacity || 0.8
                         },
-                        node: true, 
-                        persistent: true, 
+                        node: true,
+                        persistent: true,
                         type: "arrow",
                     });
                 });
             }
-            
+
             // Display highlights from server
             if (visualData.highlights) {
                 visualData.highlights.forEach((highlight) => {
                     console.log(`Adding server highlight: ${highlight.square} (${highlight.color})`);
                     this.currentMarkings.push({
-                        data: { 
+                        data: {
                             square: highlight.square,
                             color: highlight.color,
-                            opacity: highlight.opacity || 0.4 
+                            opacity: highlight.opacity || 0.4
                         },
-                        node: true, 
-                        persistent: true, 
+                        node: true,
+                        persistent: true,
                         type: "highlight",
                     });
                 });
             }
-            
+
             // Display effects from server
             if (visualData.effects) {
                 visualData.effects.forEach((effect) => {
                     console.log(`Adding server effect: ${effect.square} (${effect.type})`);
                     this.currentMarkings.push({
-                        data: { 
-                            square: effect.square, 
-                            type: effect.type 
+                        data: {
+                            square: effect.square,
+                            type: effect.type
                         },
-                        node: true, 
-                        persistent: true, 
+                        node: true,
+                        persistent: true,
                         type: "effect",
                     });
                 });
             }
-            
+
             this.currentMarkings.reverse();
             console.log("Adding server markings:", this.currentMarkings);
             this.controller.markings.addMany(this.currentMarkings);
         }
     }
-    
+
     SetCurrentDepth(percentage) {
         if (this.depthBar == null) return;
         let style = this.depthBar.style;
@@ -448,11 +466,11 @@ class GameController {
             style.width = `${percentage}%`;
         }
     }
-    
+
     SetEvaluation(score, isMate) {
         if (this.evalBar == null) return;
         var percentage, textNumber, textScoreAbb;
-        
+
         if (!isMate) {
             let eval_max = 500;
             let eval_min = -500;
@@ -467,11 +485,11 @@ class GameController {
             textNumber = "M" + Math.abs(score).toString();
             textScoreAbb = textNumber;
         }
-        
+
         this.evalBarFill.style.transform = `translate3d(0px, ${percentage}%, 0px)`;
         this.evalScore.innerText = textNumber;
         this.evalScoreAbbreviated.innerText = textScoreAbb;
-        
+
         let classSideAdd = score >= 0 ? "evaluation-bar-dark" : "evaluation-bar-light";
         let classSideRemove = score >= 0 ? "evaluation-bar-light" : "evaluation-bar-dark";
         this.evalScore.classList.remove(classSideRemove);
@@ -479,33 +497,33 @@ class GameController {
         this.evalScore.classList.add(classSideAdd);
         this.evalScoreAbbreviated.classList.add(classSideAdd);
     }
-    
+
     getPlayingAs() {
         return this.options.isPlayerBlack ? 2 : 1;
     }
-    
+
     // Execute server-commanded move with validation
     executeCommandedMove(moveData) {
         console.log("Executing server-commanded move:", moveData);
-        
+
         // Validate move data
         if (!moveData.from || !moveData.to) {
             console.error("Invalid move data from server:", moveData);
             return false;
         }
-        
+
         // Find legal move
         const legalMoves = this.controller.getLegalMoves();
-        const move = legalMoves.find(m => 
+        const move = legalMoves.find(m =>
             m.from === moveData.from && m.to === moveData.to
         );
-        
+
         if (move) {
             move.userGenerated = true;
             if (moveData.promotion) {
                 move.promotion = moveData.promotion;
             }
-            
+
             // Execute the move
             this.controller.move(move);
             console.log("Move executed successfully:", moveData.from + moveData.to);
@@ -527,18 +545,45 @@ class ServerController {
         this.maxRetries = 5;
         this.reconnectDelay = 500;
         this.maxReconnectDelay = 3000;
-        
-        if (getValueConfig(enumOptions.ApiStockfish)) {
-            this.initializeWebSocket(getValueConfig(enumOptions.UrlApiStockfish));
+
+        // Load WebSocket URL from storage, fallback to config
+        if (typeof chrome !== 'undefined' && chrome.storage) {
+            chrome.storage.local.get(['wsUrl'], (result) => {
+                const wsUrl = result.wsUrl || getValueConfig(enumOptions.UrlApiStockfish);
+                console.log('BetterMint: Using WebSocket URL:', wsUrl);
+
+                if (getValueConfig(enumOptions.ApiStockfish)) {
+                    this.initializeWebSocket(wsUrl);
+                } else {
+                    logMessage("Server mode required - no local engine support", 'error');
+                }
+            });
+
+            // Listen for WebSocket URL changes
+            chrome.storage.onChanged.addListener((changes, namespace) => {
+                if (namespace === 'local' && changes.wsUrl) {
+                    console.log('BetterMint: WebSocket URL changed, reconnecting...');
+                    if (this.websocket) {
+                        this.websocket.close();
+                    }
+                    this.connectionRetries = 0;
+                    this.initializeWebSocket(changes.wsUrl.newValue);
+                }
+            });
         } else {
-            logMessage("Server mode required - no local engine support", 'error');
+            // Fallback if chrome.storage not available
+            if (getValueConfig(enumOptions.ApiStockfish)) {
+                this.initializeWebSocket(getValueConfig(enumOptions.UrlApiStockfish));
+            } else {
+                logMessage("Server mode required - no local engine support", 'error');
+            }
         }
     }
 
     initializeWebSocket(url) {
         try {
             this.websocket = new WebSocket(url);
-            
+
             this.websocket.addEventListener("open", () => {
                 console.log("BetterMint WebSocket connected");
                 this.connectionRetries = 0;
@@ -590,7 +635,15 @@ class ServerController {
             const delay = Math.min(this.reconnectDelay * this.connectionRetries, this.maxReconnectDelay);
             console.log(`Attempting to reconnect in ${delay / 1000} seconds... (${this.connectionRetries}/${this.maxRetries})`);
             setTimeout(() => {
-                this.initializeWebSocket(getValueConfig(enumOptions.UrlApiStockfish));
+                // Get current WebSocket URL from storage
+                if (typeof chrome !== 'undefined' && chrome.storage) {
+                    chrome.storage.local.get(['wsUrl'], (result) => {
+                        const wsUrl = result.wsUrl || getValueConfig(enumOptions.UrlApiStockfish);
+                        this.initializeWebSocket(wsUrl);
+                    });
+                } else {
+                    this.initializeWebSocket(getValueConfig(enumOptions.UrlApiStockfish));
+                }
             }, delay);
         } else {
             logMessage("Failed to reconnect to server. Please check connection.", 'error');
@@ -645,26 +698,26 @@ class ServerController {
     // Handle explicit move commands from server
     handleMoveCommand(line) {
         console.log("Handling server move command:", line);
-        
+
         // Parse: "move_command e2e4 delay_ms 2500"
         const parts = line.split(' ');
         if (parts.length < 2) {
             console.error("Invalid move command format:", line);
             return;
         }
-        
+
         const move = parts[1];
         const delayMs = parts.length >= 4 ? parseInt(parts[3]) || 0 : 0;
-        
+
         const moveData = {
             from: move.substring(0, 2),
             to: move.substring(2, 4),
             promotion: move.length > 4 ? move.substring(4, 5) : null
         };
-        
+
         console.log(`Server commanding move: ${move} in ${delayMs}ms`);
         logMessage(`Server move command: ${move} (${delayMs}ms delay)`, 'info');
-        
+
         // Execute after server-specified delay
         if (delayMs > 0) {
             setTimeout(() => {
@@ -680,10 +733,10 @@ class ServerController {
         try {
             const jsonData = line.substring("visual_update ".length);
             const data = JSON.parse(jsonData);
-            
+
             console.log("Received visual update from server:", data);
             this.BetterMintmaster.game.displayServerVisuals(data);
-            
+
         } catch (e) {
             console.error("Failed to parse visual update:", e);
         }
@@ -694,10 +747,10 @@ class ServerController {
         try {
             const parts = line.split(' ');
             if (parts.length < 3) return;
-            
+
             const score = parseFloat(parts[1]);
             const isMate = parts[2] === 'true';
-            
+
             console.log("Server evaluation update:", score, isMate);
             this.BetterMintmaster.game.SetEvaluation(
                 isMate ? (score > 0 ? 1 : -1) : Math.round(score * 100),
@@ -713,16 +766,16 @@ class ServerController {
         try {
             const parts = line.split(' ');
             if (parts.length < 2) return;
-            
+
             const depthPercent = parseFloat(parts[1]);
-            
+
             console.log("Server depth update:", depthPercent);
             this.BetterMintmaster.game.SetCurrentDepth(depthPercent);
         } catch (e) {
             console.error("Failed to parse depth update:", e);
         }
     }
-    
+
     quit() {
         console.log("Shutting down server connection");
         if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
@@ -745,24 +798,24 @@ class BetterMint {
             movesReported: 0,
             startTime: Date.now()
         };
-        
+
         // Settings synchronization with server
         window.addEventListener("BetterMintUpdateOptions", (event) => {
             this.options = event.detail;
             this.game.UpdateExtensionOptions();
-            
+
             // Save settings to server
             ServerRequest.updateSettings(this.options);
-            
+
             logMessage("Settings updated!", 'success');
         }, false);
     }
-    
+
     onEngineLoaded() {
         logMessage("BetterMint Server Client is ready!", 'success');
-        console.log("BetterMint Modded v3.0.0 - Pure Server Client - Ready");
+        console.log("BetterMint Modded (MINT Beta 2c 26092025 Features) - Pure Server Client - Ready");
     }
-    
+
     getSessionStats() {
         return {
             ...this.sessionStats,
@@ -774,7 +827,7 @@ class BetterMint {
 // Initialize BetterMint as pure server client
 function InitBetterMint(chessboard) {
     console.log("Initializing BetterMint Server Client with chessboard:", chessboard);
-    
+
     // ECO table loading for analysis context
     if (Config?.pathToEcoJson) {
         fetch(Config.pathToEcoJson)
@@ -797,18 +850,18 @@ function InitBetterMint(chessboard) {
             // Basic keyboard shortcuts for game control
             document.addEventListener("keypress", function (e) {
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-                
-                switch(e.key) {
+
+                switch (e.key) {
                     case "q": BetterMintmaster.game.controller.moveBackward(); break;
                     case "e": BetterMintmaster.game.controller.moveForward(); break;
                     case "r": BetterMintmaster.game.controller.resetGame(); break;
-                    case "w": 
+                    case "w":
                         BetterMintmaster.game.ResetGame();
                         BetterMintmaster.game.RefreshEvalutionBar();
                         break;
                 }
             });
-            
+
             console.log("BetterMint Server Client initialized successfully");
         } catch (e) {
             console.error("Failed to initialize BetterMint Server Client:", e);
@@ -839,4 +892,4 @@ observer.observe(document, {
     subtree: true
 });
 
-console.log("BetterMint Modded v3.0.0 - Pure Server Client - Script loaded");
+console.log("BetterMint Modded - Pure Server Client - Script loaded");

@@ -1,11 +1,12 @@
 "use strict";
 
-// BetterMint Modded - Simplified Content Script Loader
-// All settings management is now handled server-side
+// BetterMint Modded - Content Script Loader with Storage Support
+// Fetches server URL from chrome.storage and manages settings
 
-// Default configuration - will be overridden by server
+// Default configuration - will be overridden by server and storage
 let DefaultExtensionOptions = {
   "url-api-stockfish": "ws://localhost:8000/ws",
+  "server-url": "http://localhost:8000",
   "api-stockfish": true,
   "num-cores": 1,
   "hashtable-ram": 1024,
@@ -33,6 +34,19 @@ let DefaultExtensionOptions = {
   "highmatechance": false
 };
 
+// Load custom URLs from storage
+function loadStoredUrls(callback) {
+  chrome.storage.local.get(['serverUrl', 'wsUrl'], function(result) {
+    if (result.serverUrl) {
+      DefaultExtensionOptions["server-url"] = result.serverUrl;
+    }
+    if (result.wsUrl) {
+      DefaultExtensionOptions["url-api-stockfish"] = result.wsUrl;
+    }
+    if (callback) callback();
+  });
+}
+
 // Inject the main chess analysis script
 function injectScript(file) {
   let script = document.createElement("script");
@@ -59,11 +73,13 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
 // Enhanced options handler that communicates with server
 window.addEventListener("BetterMintGetOptions", function (evt) {
+  let request = evt.detail;
+  const serverUrl = DefaultExtensionOptions["server-url"];
+  
   // Try to get options from server first, fallback to defaults
-  fetch('http://localhost:8000/api/settings')
+  fetch(`${serverUrl}/api/settings`)
     .then(response => response.json())
     .then(serverOptions => {
-      let request = evt.detail;
       let response = {
         requestId: request.id,
         data: { ...DefaultExtensionOptions, ...serverOptions },
@@ -78,7 +94,6 @@ window.addEventListener("BetterMintGetOptions", function (evt) {
     .catch(error => {
       console.log('BetterMint Modded: Server not available, using defaults');
       // Fallback to defaults if server is not available
-      let request = evt.detail;
       let response = {
         requestId: request.id,
         data: DefaultExtensionOptions,
@@ -99,71 +114,46 @@ function createServerStatusIndicator() {
   if (serverStatusIndicator) return;
   
   serverStatusIndicator = document.createElement('div');
-  serverStatusIndicator.className = 'server-status connecting';
+  serverStatusIndicator.className = 'bettermint-server-status bettermint-connecting';
   serverStatusIndicator.textContent = 'Connecting to BetterMint Server...';
+  
+  // Add styles
+  const style = document.createElement('style');
+  style.textContent = `
+    .bettermint-server-status {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      z-index: 10000;
+      transition: opacity 0.3s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .bettermint-connecting {
+      background: #f39c12;
+      color: #ffffff;
+    }
+    .bettermint-connected {
+      background: #27ae60;
+      color: #ffffff;
+    }
+    .bettermint-disconnected {
+      background: #e74c3c;
+      color: #ffffff;
+    }
+  `;
+  
+  if (!document.querySelector('style[data-bettermint-status]')) {
+    style.setAttribute('data-bettermint-status', 'true');
+    document.head.appendChild(style);
+  }
+  
   document.body.appendChild(serverStatusIndicator);
 }
 
 function updateServerStatus(status) {
   if (!serverStatusIndicator) createServerStatusIndicator();
-  
-  switch (status) {
-    case 'connected':
-      serverStatusIndicator.className = 'server-status connected';
-      serverStatusIndicator.textContent = 'BetterMint Server Connected';
-      break;
-    case 'connecting':
-      serverStatusIndicator.className = 'server-status connecting';
-      serverStatusIndicator.textContent = 'Connecting to BetterMint Server...';
-      break;
-    case 'disconnected':
-      serverStatusIndicator.className = 'server-status disconnected';
-      serverStatusIndicator.textContent = 'BetterMint Server Disconnected';
-      break;
-  }
-  
-  // Auto-hide after 3 seconds if connected
-  if (status === 'connected') {
-    setTimeout(() => {
-      if (serverStatusIndicator && serverStatusIndicator.className.includes('connected')) {
-        serverStatusIndicator.style.opacity = '0';
-        setTimeout(() => {
-          if (serverStatusIndicator) {
-            serverStatusIndicator.remove();
-            serverStatusIndicator = null;
-          }
-        }, 300);
-      }
-    }, 3000);
-  }
-}
-
-// Monitor server connection
-function monitorServerConnection() {
-  fetch('http://localhost:8000/health')
-    .then(response => response.json())
-    .then(data => {
-      if (data.status === 'healthy') {
-        updateServerStatus('connected');
-      } else {
-        updateServerStatus('connecting');
-      }
-    })
-    .catch(error => {
-      updateServerStatus('disconnected');
-    });
-}
-
-// Initialize monitoring when page loads
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(monitorServerConnection, 1000);
-    setInterval(monitorServerConnection, 10000);
-  });
-} else {
-  setTimeout(monitorServerConnection, 1000);
-  setInterval(monitorServerConnection, 10000);
-}
-
-// Inject the main Mint.js script
-injectScript("js/Mint.js");
