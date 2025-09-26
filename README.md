@@ -4,6 +4,7 @@
 ~~Releases as BETA on **Sunday**. Stay tuned!~~ Released!
 
 New update 26/09/2025: Improvements
+
 `MINT Beta 2c 26092025 Features`
 What's new?
 * Improved startup stability
