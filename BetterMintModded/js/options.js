@@ -176,7 +176,7 @@ async function checkServerStatus() {
                     } catch (e) {
                         // Not JSON, but server responded - consider it healthy
                         console.log('BetterMint: Server responded (non-JSON) from', endpoint);
-                        data = { status: 'healthy', version: '3.0.0' };
+                        data = { status: 'healthy', version: 'MINT Beta 2c 26092025 Bugfixes' };
                         break;
                     }
                 }
@@ -210,7 +210,7 @@ function handleSuccessfulConnection(data) {
     elements.statusDetails.textContent = 'Server is running and ready';
 
     // Show server information - handle various response formats
-    elements.serverVersion.textContent = data.version || data.app_version || '3.0.0';
+    elements.serverVersion.textContent = data.version || data.app_version || 'MINT Beta 2c 26092025 Bugfixes';
     elements.engineCount.textContent = data.engines || data.engine_count || data.available_engines || 'N/A';
 
     // Handle uptime - could be in seconds, milliseconds, or as a formatted string
