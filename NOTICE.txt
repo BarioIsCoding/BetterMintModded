@@ -1,50 +1,38 @@
+```
 This tool includes the following third-party chess engines and components:
-
 ---
-
 1. Stockfish (https://stockfishchess.org/)
    License: GNU General Public License v3.0 (GPLv3)
    Copyright (c) Stockfish developers
    Source: https://github.com/official-stockfish/Stockfish
-
    You may redistribute and/or modify Stockfish under the terms of the GPLv3.
    The full text of the GPLv3 license is included in LICENSES/GPLv3.txt.
-
 ---
-
 2. Lc0 - Leela Chess Zero (https://lczero.org/)
    License: GNU General Public License v3.0 (GPLv3)
    Copyright (c) The LCZero Team
    Source: https://github.com/LeelaChessZero/lc0
-
    This engine is included under the terms of GPLv3.
    The full license is available in LICENSES/GPLv3.txt.
-
-   Note: If distributed with pre-trained neural network weights, those weights may be
-   subject to additional licenses (check LICENSES/lc0-weights.txt if included).
-
+   Note: The training data used by the Leela Chess Zero project is released 
+   under the Open Database License (ODbL). If redistributing training data, 
+   comply with ODbL terms.
 ---
-
 3. Maia Chess (https://maiachess.com/)
-   - Source Code License: MIT License
-   - Network Weights License: Creative Commons Attribution-ShareAlike 4.0 (CC BY-SA 4.0)
-   Copyright (c) 2019 University of Washington
-
+   License: GNU General Public License v3.0 (GPLv3)
+   Copyright (c) 2020 University of Toronto / CSSLab
    Source: https://github.com/CSSLab/maia-chess
-   Weights: https://maiachess.com/
-
-   The Maia weights are used under CC BY-SA 4.0. You are free to share and adapt them, 
-   as long as you provide appropriate credit and distribute any modifications under 
-   the same license.
-
-   Attribution Required:
-   "This software uses Maia neural networks released under CC BY-SA 4.0 by the University of Washington."
-
-   Full CC BY-SA license: LICENSES/CC-BY-SA-4.0.txt
-
+   Both the code and neural network weights are released under GPLv3.
+   The full license is available in LICENSES/GPLv3.txt.
+   
+   Citation:
+   McIlroy-Young, Reid and Sen, Siddhartha and Kleinberg, Jon and Anderson, Ashton (2020).
+   "Aligning Superhuman AI with Human Behavior: Chess as a Model System."
+   Proceedings of the 25th ACM SIGKDD international conference on Knowledge discovery and data mining.
 ---
-
 To comply with all licenses:
 - Keep this NOTICE file intact.
 - Do not remove credit or claim the engines as your own.
 - Provide access to full license texts.
+- When distributing, provide source code or a written offer to provide source code.
+```
