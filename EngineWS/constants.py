@@ -24,7 +24,7 @@ COLORS = {
 # Application metadata
 APP_NAME = "BetterMint Modded"
 APP_VERSION = "MINT Beta 2b 24092025 Bugfixes"
-APP_ORGANIZATION = "BetterMint Team" # We are not actually affiliated with BetterMint. This is just used to show the original team in the code.
+APP_ORGANIZATION = "BetterMint Team"
 
 # Server configuration
 DEFAULT_PORT = 8000

@@ -1,6 +1,6 @@
 """
 Main window for BetterMint Modded GUI
-Enhanced with Rodent IV engine support and smooth performance monitoring
+Enhanced with Rodent IV engine support, smooth performance monitoring, and Custom Engine Store
 """
 
 import os
@@ -27,6 +27,7 @@ from .tabs import (
     VisualSettingsTab, AdvancedSettingsTab, MonitoringTab, ChessComWebView
 )
 from .intelligence_tab import IntelligenceTab
+from .engine_store import EngineStoreDialog, EngineManager
 from settings import SettingsManager
 from server import create_server
 from engine import EngineChess, EnhancedIntelligentEngineManager
@@ -35,6 +36,69 @@ from constants import *
 import asyncio
 import uvicorn
 from threading import Event
+
+
+class CollapsibleGroupBox(QWidget):
+    """Custom collapsible group box with toggle button"""
+    
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self.title = title
+        self.is_collapsed = False
+        
+        # Main layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Header with toggle button
+        header = QFrame()
+        header.setObjectName("collapsible_header")
+        header.setCursor(Qt.PointingHandCursor)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(10, 8, 10, 8)
+        
+        # Toggle indicator
+        self.toggle_icon = QLabel("▼")
+        self.toggle_icon.setObjectName("toggle_icon")
+        header_layout.addWidget(self.toggle_icon)
+        
+        # Title
+        title_label = QLabel(title)
+        title_label.setObjectName("collapsible_title")
+        header_layout.addWidget(title_label)
+        
+        header_layout.addStretch()
+        
+        # Make header clickable
+        header.mousePressEvent = lambda e: self.toggle_collapsed()
+        
+        main_layout.addWidget(header)
+        
+        # Content container
+        self.content_widget = QWidget()
+        self.content_widget.setObjectName("collapsible_content")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.addWidget(self.content_widget)
+        
+        # Apply base styling
+        self.setObjectName("collapsible_group")
+    
+    def toggle_collapsed(self):
+        """Toggle collapsed state"""
+        self.is_collapsed = not self.is_collapsed
+        self.content_widget.setVisible(not self.is_collapsed)
+        self.toggle_icon.setText("▶" if self.is_collapsed else "▼")
+    
+    def addWidget(self, widget):
+        """Add widget to content layout"""
+        self.content_layout.addWidget(widget)
+    
+    def addLayout(self, layout):
+        """Add layout to content layout"""
+        self.content_layout.addLayout(layout)
+
 
 class ServerThread(QThread):
     """Thread for running the FastAPI server - FIXED VERSION"""
@@ -105,8 +169,6 @@ class ServerThread(QThread):
                 self.log_message.emit(f"Loaded engine: {config['name']}")
                 
                 # CRITICAL FIX: Initialize ALL engines, not just Maia
-                # The engine.initialize_engine() method will be called automatically
-                # in the new __init__, but we can also call it explicitly here
                 engine.initialize_engine()
                 self.log_message.emit(f"Initialized engine: {config['name']}")
                 
@@ -210,7 +272,7 @@ class SmoothProgressBar(QProgressBar):
 class ChessEngineGUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{APP_NAME} - Advanced Chess Engine Manager")
+        self.setWindowTitle(f"{APP_NAME}")
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.resize(WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT)
         self.set_window_icon()
@@ -229,6 +291,10 @@ class ChessEngineGUI(QMainWindow):
         # Server thread
         self.server_thread = None
         self.server_running = False
+        
+        # Engine manager for custom engines
+        self.engine_manager = EngineManager()
+        self.custom_engine_checkboxes = {}
 
         # Performance monitoring with smoothing
         self.performance_data = []
@@ -461,9 +527,9 @@ class ChessEngineGUI(QMainWindow):
         self.settings_tabs = QTabWidget()
         self.settings_tabs.setObjectName("settings_tabs")
 
-        # Chess.com Tab (First)
+        # Extension Tab (First)
         self.chess_com_tab = ChessComWebView()
-        self.settings_tabs.addTab(self.chess_com_tab, "Chess.com")
+        self.settings_tabs.addTab(self.chess_com_tab, "Extension")
 
         # Engine Settings Tab
         self.engine_settings_tab = EngineSettingsTab(self.settings_manager)
@@ -499,10 +565,9 @@ class ChessEngineGUI(QMainWindow):
         return self.settings_tabs
 
     def setup_engine_section(self, layout):
-        engine_group = QGroupBox("Chess Engines")
-        engine_group.setObjectName("group_box")
+        engine_group = CollapsibleGroupBox("Chess Engines")
 
-        engine_layout = QVBoxLayout(engine_group)
+        engine_layout = QVBoxLayout()
         engine_layout.setSpacing(10)
 
         # Stockfish
@@ -511,7 +576,7 @@ class ChessEngineGUI(QMainWindow):
         )
         engine_layout.addWidget(self.stockfish_frame)
 
-        # Rodent IV - NEW ENGINE SUPPORT
+        # Rodent IV
         self.rodent_frame = self.create_engine_option(
             "Rodent IV", "Personality-based engine", self.check_rodent_available()
         )
@@ -525,6 +590,38 @@ class ChessEngineGUI(QMainWindow):
 
         # Maia configuration
         self.setup_maia_options(engine_layout)
+        
+        # Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        separator.setObjectName("engine_separator")
+        engine_layout.addWidget(separator)
+        
+        # Custom Engines Section
+        custom_label = QLabel("Custom Engines")
+        custom_label.setObjectName("section_label")
+        engine_layout.addWidget(custom_label)
+        
+        # Custom engines container (scrollable for many engines)
+        self.custom_engines_frame = QFrame()
+        self.custom_engines_frame.setObjectName("custom_engines_frame")
+        self.custom_engines_layout = QVBoxLayout(self.custom_engines_frame)
+        self.custom_engines_layout.setSpacing(5)
+        self.custom_engines_layout.setContentsMargins(5, 5, 5, 5)
+        engine_layout.addWidget(self.custom_engines_frame)
+        
+        # Engine Store button
+        store_button = QPushButton("Open Engine Store")
+        store_button.setObjectName("store_button")
+        store_button.setMinimumHeight(36)
+        store_button.clicked.connect(self.open_engine_store)
+        engine_layout.addWidget(store_button)
+        
+        engine_group.addLayout(engine_layout)
+        
+        # Load custom engines
+        self.load_custom_engines()
 
         layout.addWidget(engine_group)
 
@@ -631,10 +728,9 @@ class ChessEngineGUI(QMainWindow):
         layout.addWidget(self.maia_frame)
 
     def setup_server_status_section(self, layout):
-        status_group = QGroupBox("Server Status")
-        status_group.setObjectName("group_box")
+        status_group = CollapsibleGroupBox("Server Status")
 
-        status_layout = QVBoxLayout(status_group)
+        status_layout = QVBoxLayout()
 
         self.status_label_local = QLabel("Server: Stopped")
         self.status_label_local.setObjectName("status_stopped")
@@ -648,6 +744,7 @@ class ChessEngineGUI(QMainWindow):
         self.connections_label.setObjectName("status_info")
         status_layout.addWidget(self.connections_label)
 
+        status_group.addLayout(status_layout)
         layout.addWidget(status_group)
 
     def setup_control_buttons(self, layout):
@@ -671,10 +768,9 @@ class ChessEngineGUI(QMainWindow):
         layout.addLayout(buttons_layout)
 
     def create_performance_widget(self):
-        perf_group = QGroupBox("Performance Monitor")
-        perf_group.setObjectName("group_box")
+        perf_group = CollapsibleGroupBox("Performance Monitor")
 
-        perf_layout = QVBoxLayout(perf_group)
+        perf_layout = QVBoxLayout()
 
         self.cpu_progress = QProgressBar()
         self.cpu_progress.setObjectName("progress_bar")
@@ -688,7 +784,53 @@ class ChessEngineGUI(QMainWindow):
         perf_layout.addWidget(self.memory_label)
         perf_layout.addWidget(self.memory_progress)
 
+        perf_group.addLayout(perf_layout)
         return perf_group
+
+    def load_custom_engines(self):
+        """Load and display custom engines"""
+        # Clear existing custom engine checkboxes
+        while self.custom_engines_layout.count() > 0:
+            item = self.custom_engines_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        self.custom_engine_checkboxes.clear()
+        
+        # Reload engines from disk
+        self.engine_manager.load_all_engines()
+        
+        # Add checkbox for each custom engine
+        custom_count = 0
+        for engine_name, manifest in self.engine_manager.engines.items():
+            if not manifest.is_builtin:
+                checkbox = QCheckBox(engine_name)
+                checkbox.setObjectName("custom_engine_checkbox")
+                checkbox.setToolTip(manifest.description)
+                checkbox.toggled.connect(self.on_engine_config_changed)
+                
+                self.custom_engines_layout.addWidget(checkbox)
+                self.custom_engine_checkboxes[engine_name] = checkbox
+                custom_count += 1
+        
+        # Show message if no custom engines
+        if custom_count == 0:
+            no_custom_label = QLabel("No custom engines installed")
+            no_custom_label.setObjectName("no_custom_label")
+            no_custom_label.setAlignment(Qt.AlignCenter)
+            self.custom_engines_layout.addWidget(no_custom_label)
+        
+        print(f"Loaded {custom_count} custom engines")
+    
+    def open_engine_store(self):
+        """Open the engine store dialog"""
+        store_dialog = EngineStoreDialog(self)
+        store_dialog.engines_changed.connect(self.load_custom_engines)
+        store_dialog.exec()
+        
+        # Log to monitoring tab
+        if hasattr(self, 'monitoring_tab'):
+            self.monitoring_tab.log_activity("Engine store accessed")
 
     def apply_styles(self):
         # Import the complete stylesheet from the original main.py
@@ -697,8 +839,7 @@ class ChessEngineGUI(QMainWindow):
             QMainWindow {{
                 background-color: {COLORS['darker_gray']};
                 color: {COLORS['white']};
-                font-family: 'Montserrat'
-                , -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             }}
 
             QTabWidget#settings_tabs {{
@@ -763,12 +904,41 @@ class ChessEngineGUI(QMainWindow):
                 margin: 10px 0;
                 letter-spacing: 1px;
             }}
+            
+            QLabel#section_label {{
+                font-size: 13px;
+                font-weight: 700;
+                color: {COLORS['light_green']};
+                margin-top: 8px;
+                margin-bottom: 5px;
+            }}
+            
+            QLabel#no_custom_label {{
+                color: rgba(255, 255, 255, 0.5);
+                font-size: 11px;
+                font-style: italic;
+                padding: 5px;
+            }}
 
             QFrame#engine_option {{
                 background-color: rgba(75, 72, 71, 0.5);
                 border: 1px solid {COLORS['dark_gray']};
                 border-radius: 6px;
                 margin: 2px;
+            }}
+            
+            QFrame#custom_engines_frame {{
+                background-color: rgba(75, 72, 71, 0.3);
+                border: 1px solid {COLORS['dark_gray']};
+                border-radius: 4px;
+                padding: 3px;
+                max-height: 150px;
+            }}
+            
+            QFrame#engine_separator {{
+                background-color: {COLORS['dark_gray']};
+                max-height: 1px;
+                margin: 8px 0;
             }}
 
             QCheckBox {{
@@ -781,6 +951,12 @@ class ChessEngineGUI(QMainWindow):
             QCheckBox#engine_checkbox, QCheckBox#maia_checkbox, QCheckBox#intelligence_checkbox {{
                 font-weight: 600;
                 font-size: 14px;
+            }}
+            
+            QCheckBox#custom_engine_checkbox {{
+                font-weight: 500;
+                font-size: 12px;
+                padding: 3px;
             }}
 
             QCheckBox::indicator {{
@@ -979,6 +1155,23 @@ class ChessEngineGUI(QMainWindow):
                 background-color: rgba(102, 102, 102, 0.5);
                 color: rgba(153, 153, 153, 0.8);
             }}
+            
+            QPushButton#store_button {{
+                background-color: {COLORS['accent_blue']};
+                color: {COLORS['white']};
+                border: none;
+                border-radius: 5px;
+                font-weight: 600;
+                font-size: 13px;
+            }}
+            
+            QPushButton#store_button:hover {{
+                background-color: #2980b9;
+            }}
+            
+            QPushButton#store_button:pressed {{
+                background-color: #21618c;
+            }}
 
             QSpinBox, QDoubleSpinBox {{
                 background-color: {COLORS['dark_gray']};
@@ -1150,17 +1343,52 @@ class ChessEngineGUI(QMainWindow):
             }}
 
             QScrollArea#settings_scroll_area {{
-                background-color: #2c2b29;  /* or your COLORS['darker_gray'] value */
+                background-color: #2c2b29;
             }}
 
             QWidget#settings_scroll_content {{
-                background-color: #2c2b29;  /* match the scroll area */
+                background-color: #2c2b29;
             }}
                         
             QFrame#sub_setting_frame {{
                 background-color: rgba(75, 72, 71, 0.2);
                 border-left: 3px solid {COLORS['light_green']};
                 border-radius: 4px;
+            }}
+            
+            /* Collapsible GroupBox Styling */
+            QWidget#collapsible_group {{
+                background-color: rgba(75, 72, 71, 0.3);
+                border: 2px solid {COLORS['dark_gray']};
+                border-radius: 8px;
+            }}
+            
+            QFrame#collapsible_header {{
+                background-color: {COLORS['dark_gray']};
+                border-radius: 6px;
+                border: none;
+            }}
+            
+            QFrame#collapsible_header:hover {{
+                background-color: {COLORS['light_green']};
+            }}
+            
+            QLabel#collapsible_title {{
+                color: {COLORS['white']};
+                font-size: 14px;
+                font-weight: 600;
+            }}
+            
+            QLabel#toggle_icon {{
+                color: {COLORS['light_green']};
+                font-size: 14px;
+                font-weight: 700;
+                padding-right: 5px;
+            }}
+            
+            QWidget#collapsible_content {{
+                background-color: transparent;
+                border: none;
             }}
         """)
 
@@ -1213,7 +1441,7 @@ class ChessEngineGUI(QMainWindow):
                     'name': 'Stockfish'
                 })
 
-        # Rodent IV - NEW ENGINE SUPPORT
+        # Rodent IV
         if hasattr(self, 'rodent_checkbox') and self.rodent_checkbox.isChecked():
             if self.check_rodent_available():
                 selected_engines.append({
@@ -1248,6 +1476,18 @@ class ChessEngineGUI(QMainWindow):
                     'config': config,
                     'name': engine_name
                 })
+        
+        # Custom engines
+        for engine_name, checkbox in self.custom_engine_checkboxes.items():
+            if checkbox.isChecked():
+                engine_path = self.engine_manager.get_engine_path(engine_name)
+                if engine_path and os.path.exists(engine_path):
+                    selected_engines.append({
+                        'path': engine_path,
+                        'is_maia': False,
+                        'config': {},
+                        'name': engine_name
+                    })
 
         return selected_engines
 
@@ -1421,10 +1661,11 @@ class ChessEngineGUI(QMainWindow):
 
     def show_about(self):
         QMessageBox.about(self, f"About {APP_NAME}",
-                         f"{APP_NAME} v{APP_VERSION}\n\n"
+                         f"{APP_NAME} {APP_VERSION}\n\n"
                          "Advanced Chess Analysis Tool\n"
                          "Server-side managed settings\n"
-                         "Intelligent engine behavior\n\n"
+                         "Intelligent engine behavior\n"
+                         "Custom Engine Support\n\n"
                          "Enhanced by Claude AI\n"
                          f"Original BetterMint by {APP_ORGANIZATION}")
 
