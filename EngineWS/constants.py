@@ -23,7 +23,7 @@ COLORS = {
 
 # Application metadata
 APP_NAME = "BetterMint Modded"
-APP_VERSION = "MINT Beta 2b 24092025 Bugfixes"
+APP_VERSION = "MINT Beta 2c 26092025 Features"
 APP_ORGANIZATION = "BetterMint Team"
 
 # Server configuration
