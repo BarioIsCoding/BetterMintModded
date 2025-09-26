@@ -187,11 +187,16 @@ In the future, we may replace the library with our custom code (almost done!) to
 
 ## 🚨 Disclaimer
 
-**ALPHA SOFTWARE**: This is early alpha software with fewer than 10 active users. Expect bugs and incomplete features.
+**ALPHA SOFTWARE**: This is early alpha software. Expect bugs and incomplete features.
 
 **Usage**: This tool is designed for learning and analysis. Use responsibly and in accordance with chess platform terms of service.
 
 **Support**: As this is a small community project, support is limited. Please be patient and provide detailed bug reports.
+
+We are not affiliated, associated, authorized, endorsed by, or in any way officially connected with Chess.com, BotSolvers, sakiodre (formerly thedemons), or any of its subsidiaries or its affiliates. The official Chess.com website can be found at https://chess.com.
+The name Chess.com as well as related names, marks, emblems and images are registered trademarks of their respective owners.
+
+
 
 ## 💶 Donate
 You can donate via **XMR** to support this project: 
