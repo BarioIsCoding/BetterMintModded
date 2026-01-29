@@ -24,7 +24,6 @@ Note: In contrast to ChessMint, __this is not a cheating tool.__ This is a chess
 
 ![BetterMint Modded Logo](https://github.com/BarioIsCoding/BetterMintModded/blob/main/EngineWS/icons/icon-32.png?raw=true)   ![Downloads](https://img.shields.io/github/downloads/BarioIsCoding/BetterMintModded/total?style=for-the-badge)
 
-Please join the [Discord server](https://discord.gg/BGmNdcXvt3) for bugs, pull request, future updates, BETA access, and conversation.
 
 * Free to use
 * No spyware
