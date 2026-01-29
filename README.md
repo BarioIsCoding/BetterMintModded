@@ -205,8 +205,8 @@ The name Chess.com as well as related names, marks, emblems and images are regis
 
 
 ## 💶 Donate
-You can donate via **XMR** to support this project: 
+You can donate via **XMR** to support the creator: 
 `88BCjwGV46FAdGXGKRssWd5XL4knBCmgS8w4ird4UeWH9xXqG9nr6yL3coFb6UxWAFFxuX2acTcvUAyN3utGZtcVUskGPAT`
-
+Note: The project itself will not be supported, it will continue regardless of whether I end up with 0$ or 1000$.
 
 *BetterMint Modded - Bridging the gap between chess engines and human play*
