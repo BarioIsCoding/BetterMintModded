@@ -5,8 +5,7 @@
 
 New update 26/09/2025: Improvements
 
-Join the Discord for V3 - https://discord.gg/XvjxcQzJMA
-
+Join the Discord for V3 - https://discord.gg/u7QVVtmrAD
 `MINT Beta 2c 26092025 Features`
 
 What's new?
