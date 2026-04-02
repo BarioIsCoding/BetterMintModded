@@ -13,4 +13,3 @@ github.com/BarioIsCoding/*
 github.com/LeelaChessZero/*
 github.com/official-stockfish/*
 github.com/CSSLab/maia-chess/*
-cgpe.netlify.app/* - Note: This one is listed as text but we do not send request to this URL (yet).
